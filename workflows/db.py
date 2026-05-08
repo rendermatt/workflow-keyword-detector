@@ -1,6 +1,9 @@
+import csv
 import logging
 import os
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 import psycopg2
 import psycopg2.extras
@@ -47,6 +50,15 @@ def init_db() -> None:
 
 
 def save_result(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
+    """Write results to PostgreSQL or a local CSV depending on LOCAL_OUTPUT_CSV."""
+    local_csv = os.environ.get("LOCAL_OUTPUT_CSV")
+    if local_csv:
+        _save_result_csv(local_csv, run_id, url, keyword_counts)
+    else:
+        _save_result_db(run_id, url, keyword_counts)
+
+
+def _save_result_db(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
     rows = [(run_id, url, kw, cnt) for kw, cnt in keyword_counts.items()]
     if not rows:
         return
@@ -57,3 +69,19 @@ def save_result(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
             rows,
         )
     logger.info(f"Saved {len(rows)} rows for {url}")
+
+
+_CSV_COLUMNS = ["run_id", "url", "keyword", "count", "scraped_at"]
+
+
+def _save_result_csv(filepath: str, run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
+    path = Path(filepath)
+    write_header = not path.exists()
+    now = datetime.now(timezone.utc).isoformat()
+    with path.open("a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=_CSV_COLUMNS)
+        if write_header:
+            writer.writeheader()
+        for keyword, count in keyword_counts.items():
+            writer.writerow({"run_id": run_id, "url": url, "keyword": keyword, "count": count, "scraped_at": now})
+    logger.info(f"Wrote {len(keyword_counts)} rows to {filepath} for {url}")

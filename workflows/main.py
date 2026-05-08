@@ -27,6 +27,9 @@ def scrape_url(url: str, keywords: list[str], run_id: str) -> dict:
     """Scrape a single URL and count keyword occurrences, saving results to DB."""
     logger.info(f"Scraping {url}")
 
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
     try:
         response = requests.get(
             url, timeout=30, headers={"User-Agent": "Mozilla/5.0"}
@@ -71,7 +74,8 @@ async def process_csvs() -> dict:
     run_id = str(uuid.uuid4())
     logger.info(f"Starting run {run_id} (keywords={keywords_file}, urls={urls_file})")
 
-    init_db()
+    if not os.environ.get("LOCAL_OUTPUT_CSV"):
+        init_db()
 
     keywords = _read_csv_column(keywords_file, "keyword")
     urls = _read_csv_column(urls_file, "url")
