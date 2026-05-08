@@ -1,0 +1,75 @@
+category,keyword,signal_strength,rationale
+AI / ML,AI agent,high,Agents require orchestrating multi-step async tasks — core Workflows use case
+AI / ML,LLM pipeline,high,Multi-model chains need distributed execution and long timeouts
+AI / ML,machine learning,medium,ML workloads often involve batch inference and training jobs
+AI / ML,model inference,high,Batch inference jobs are long-running and benefit from parallel execution
+AI / ML,vector database,medium,Typically paired with AI pipelines that need async orchestration
+AI / ML,embedding,medium,Embedding generation at scale is a batch compute workload
+AI / ML,fine-tuning,high,Model fine-tuning runs are long-running distributed compute tasks
+AI / ML,RAG,high,Retrieval-augmented generation pipelines are async and multi-step
+AI / ML,GPT,medium,Signals LLM usage; likely has async call chains needing orchestration
+AI / ML,OpenAI,medium,API-dependent workflows often need retry logic and timeout management
+AI / ML,Anthropic,medium,Same as OpenAI — LLM API usage signals async orchestration needs
+AI / ML,Hugging Face,high,Model hosting and inference at scale maps directly to Workflows
+AI / ML,computer vision,high,Image processing pipelines are batch-oriented and parallelizable
+AI / ML,NLP,medium,Natural language processing often involves batch document processing
+Data Engineering,ETL,high,ETL is the canonical distributed task execution use case
+Data Engineering,data pipeline,high,Explicit signal for orchestrated async data movement
+Data Engineering,data ingestion,high,Ingestion jobs are long-running and benefit from parallel workers
+Data Engineering,data processing,high,Processing large datasets maps directly to Workflows' value prop
+Data Engineering,batch processing,high,Batch jobs are a primary Workflows use case
+Data Engineering,data transformation,high,Transform steps in pipelines need reliable distributed execution
+Data Engineering,Apache Spark,high,Spark users have complex distributed compute needs
+Data Engineering,dbt,high,dbt runs are batch transformation jobs that can be long-running
+Data Engineering,Airflow,high,Airflow users already think in DAGs — Workflows is a simpler alternative
+Data Engineering,Kafka,high,Kafka consumers processing events at scale need async workers
+Data Engineering,data warehouse,medium,Warehousing implies heavy ETL and transformation workloads
+Data Engineering,Snowflake,medium,Snowflake users typically have significant data pipeline needs
+Data Engineering,BigQuery,medium,Same as Snowflake — signals data engineering maturity
+Data Engineering,Redshift,medium,AWS data warehouse signals pipeline-heavy architecture
+Data Engineering,Fivetran,medium,Fivetran users have active data integration pipelines
+Data Engineering,Databricks,high,Databricks signals serious distributed data/ML workloads
+Background Jobs,background job,high,Direct signal — they already have async job infrastructure
+Background Jobs,job queue,high,Explicit queue architecture signals Workflows fit
+Background Jobs,task queue,high,Same as job queue
+Background Jobs,async worker,high,Workers consuming queues are exactly what Workflows replaces
+Background Jobs,worker process,high,Signals background processing architecture
+Background Jobs,cron job,medium,Scheduled tasks signal async workload patterns
+Background Jobs,scheduled task,medium,Same as cron job
+Background Jobs,Celery,high,Python task queue — direct Workflows alternative
+Background Jobs,Sidekiq,high,Ruby job queue — signals async architecture patterns
+Background Jobs,BullMQ,high,Node.js job queue — direct Workflows alternative
+Background Jobs,Redis queue,high,Queue-backed Redis signals async job architecture
+Background Jobs,message queue,high,Queue-based architecture maps well to Workflows
+Background Jobs,RabbitMQ,high,Message broker signals distributed async processing
+Background Jobs,SQS,high,AWS SQS usage signals queue-based async workload architecture
+Scale / Infrastructure,auto-scaling,medium,Signals variable compute needs that Workflows handles natively
+Scale / Infrastructure,distributed computing,high,Direct fit — Workflows is a distributed execution platform
+Scale / Infrastructure,parallel processing,high,Parallelism is a core Workflows capability
+Scale / Infrastructure,horizontal scaling,medium,Scale-out architectures benefit from on-demand task instances
+Scale / Infrastructure,microservices,medium,Microservice architectures often have async inter-service workflows
+Scale / Infrastructure,serverless,medium,Serverless mindset aligns with Workflows' ephemeral instances
+Scale / Infrastructure,event-driven,high,Event-driven architectures rely on async task execution
+Scale / Infrastructure,workflow orchestration,high,Direct product category match
+Scale / Infrastructure,orchestration,high,Same as above
+Scale / Infrastructure,task orchestration,high,Same as above
+Language / Stack,Python,high,Workflows has a native Python SDK — direct language fit
+Language / Stack,TypeScript,high,Workflows has a native TypeScript SDK — direct language fit
+Language / Stack,Node.js,high,TypeScript/Node stack is natively supported by Workflows SDK
+Language / Stack,FastAPI,medium,Python API framework signals Python-first stack
+Language / Stack,Django,medium,Python web framework signals Python stack
+Language / Stack,async/await,high,Async programming patterns signal awareness of concurrent execution
+Language / Stack,asyncio,high,Python asyncio usage signals async-first architecture
+Use Case Verticals,document processing,high,Processing large document sets is a parallelizable batch workload
+Use Case Verticals,video processing,high,Video encoding/transcoding is a long-running parallel compute task
+Use Case Verticals,image processing,high,Batch image jobs benefit from parallel distributed execution
+Use Case Verticals,report generation,medium,Generating reports at scale benefits from async task execution
+Use Case Verticals,web scraping,high,Scraping at scale needs distributed workers with retry logic
+Use Case Verticals,data enrichment,high,Enrichment pipelines process records in parallel batches
+Use Case Verticals,email automation,medium,Bulk email sending benefits from async queued execution
+Use Case Verticals,notification system,medium,High-volume notifications need queued async delivery
+Use Case Verticals,content generation,high,AI-powered content generation at scale needs async orchestration
+Use Case Verticals,data export,medium,Large data exports benefit from background job execution
+Use Case Verticals,PDF generation,medium,Bulk PDF creation is a parallelizable background task
+Use Case Verticals,OCR,high,Optical character recognition at scale is a batch compute workload
+Use Case Verticals,data sync,high,Syncing data between systems is an async pipeline workload

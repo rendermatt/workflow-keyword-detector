@@ -1,0 +1,35 @@
+-- Keyword scraper results table
+-- Run this once against your Render PostgreSQL database before first use.
+
+CREATE TABLE IF NOT EXISTS scrape_results (
+    id         SERIAL      PRIMARY KEY,
+    run_id     TEXT        NOT NULL,          -- UUID grouping all URLs in one trigger
+    url        TEXT        NOT NULL,
+    keyword    TEXT        NOT NULL,
+    count      INTEGER     NOT NULL,
+    scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scrape_results_run_id  ON scrape_results (run_id);
+CREATE INDEX IF NOT EXISTS idx_scrape_results_url     ON scrape_results (url);
+CREATE INDEX IF NOT EXISTS idx_scrape_results_keyword ON scrape_results (keyword);
+
+-- Handy views ----------------------------------------------------------------
+
+-- Totals per keyword across all runs
+CREATE OR REPLACE VIEW keyword_totals AS
+SELECT keyword, SUM(count) AS total_occurrences, COUNT(DISTINCT url) AS urls_matched
+FROM scrape_results
+GROUP BY keyword
+ORDER BY total_occurrences DESC;
+
+-- Per-run summary
+CREATE OR REPLACE VIEW run_summary AS
+SELECT run_id,
+       COUNT(DISTINCT url)                 AS urls_scraped,
+       COUNT(DISTINCT keyword)             AS keywords_tracked,
+       MIN(scraped_at)                     AS started_at,
+       MAX(scraped_at)                     AS finished_at
+FROM scrape_results
+GROUP BY run_id
+ORDER BY started_at DESC;
