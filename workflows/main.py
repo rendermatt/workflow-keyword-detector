@@ -1,8 +1,9 @@
 import asyncio
 import csv
-import io
 import logging
+import os
 import uuid
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
@@ -46,31 +47,34 @@ def scrape_url(url: str, keywords: list[str], run_id: str) -> dict:
     return {"url": url, "keyword_counts": keyword_counts}
 
 
+def _read_csv_column(filename: str, column: str) -> list[str]:
+    """Read a single column from a CSV file in the workflows root directory."""
+    path = Path(__file__).parent / filename
+    with path.open() as f:
+        return [
+            row.get(column, "").strip() or next(iter(row.values()), "").strip()
+            for row in csv.DictReader(f)
+            if any(row.values())
+        ]
+
+
 @app.task
-async def process_csvs(keywords_csv: str, urls_csv: str) -> dict:
+async def process_csvs() -> dict:
     """
-    Entry-point task. Accepts the raw CSV text for keywords and URLs,
-    then fans out a scrape_url task for every URL in parallel.
+    Entry-point task. Reads keyword and URL CSVs from filenames set in
+    KEYWORDS_CSV and URLS_CSV environment variables (resolved relative to
+    the workflows root directory), then fans out a scrape_url task per URL.
     """
+    keywords_file = os.environ["KEYWORDS_CSV"]
+    urls_file = os.environ["URLS_CSV"]
+
     run_id = str(uuid.uuid4())
-    logger.info(f"Starting run {run_id}")
+    logger.info(f"Starting run {run_id} (keywords={keywords_file}, urls={urls_file})")
 
     init_db()
 
-    def _first_value(row: dict) -> str:
-        return (row.get("keyword") or row.get("url") or next(iter(row.values()), "")).strip()
-
-    keywords = [
-        row.get("keyword", "").strip() or next(iter(row.values()), "").strip()
-        for row in csv.DictReader(io.StringIO(keywords_csv))
-        if any(row.values())
-    ]
-
-    urls = [
-        row.get("url", "").strip() or next(iter(row.values()), "").strip()
-        for row in csv.DictReader(io.StringIO(urls_csv))
-        if any(row.values())
-    ]
+    keywords = _read_csv_column(keywords_file, "keyword")
+    urls = _read_csv_column(urls_file, "url")
 
     logger.info(f"{len(keywords)} keywords, {len(urls)} URLs")
 
@@ -82,3 +86,7 @@ async def process_csvs(keywords_csv: str, urls_csv: str) -> dict:
         "keywords_tracked": len(keywords),
         "results": list(results),
     }
+
+
+if __name__ == "__main__":
+    app.start()  # required — registers tasks with Render and starts the task server
