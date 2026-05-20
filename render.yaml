@@ -1,13 +1,13 @@
 # Exported from Render on 2026-05-20T19:27:53Z
 version: "1"
-previews:
-  generation: automatic
 projects:
 - name: My project
   environments:
   - name: Production
     services:
     - type: web
+      previews:
+        generation: automatic
       name: workflow-keyword-detector
       runtime: python
       repo: https://github.com/Mattrender/workflow-keyword-detector
