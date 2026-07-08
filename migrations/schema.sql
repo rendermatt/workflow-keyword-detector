@@ -33,3 +33,27 @@ SELECT run_id,
 FROM scrape_results
 GROUP BY run_id
 ORDER BY started_at DESC;
+
+-- Features ---------------------------------------------------------------------
+-- A "feature" is a thing we look for on a prospect's site to identify a
+-- potential user (e.g. "Workflows"). Each feature bundles a documentation link
+-- and a set of keywords that signal the feature is in use. Future scrape runs
+-- will iterate over features instead of a single flat keyword list.
+
+CREATE TABLE IF NOT EXISTS features (
+    id                SERIAL      PRIMARY KEY,
+    name              TEXT        NOT NULL UNIQUE,
+    documentation_url TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS feature_keywords (
+    id         SERIAL  PRIMARY KEY,
+    feature_id INTEGER NOT NULL REFERENCES features (id) ON DELETE CASCADE,
+    keyword    TEXT    NOT NULL,
+    UNIQUE (feature_id, keyword)
+);
+
+CREATE INDEX IF NOT EXISTS idx_feature_keywords_feature_id
+    ON feature_keywords (feature_id);

@@ -1,7 +1,9 @@
 import os
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 import psycopg2
 import psycopg2.extras
+
+from seed_data import SEED_FEATURES
 
 DB_URL = os.environ["DATABASE_URL"]
 
@@ -12,9 +14,73 @@ def get_conn():
     return psycopg2.connect(DB_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
+def _parse_keywords(raw) -> list[str]:
+    """Normalize keyword input (list, or comma/newline-separated string) into a
+    de-duplicated, order-preserving list of trimmed keywords."""
+    if isinstance(raw, str):
+        raw = raw.replace("\n", ",").split(",")
+    seen, result = set(), []
+    for kw in raw or []:
+        kw = (kw or "").strip()
+        key = kw.lower()
+        if kw and key not in seen:
+            seen.add(key)
+            result.append(kw)
+    return result
+
+
+def init_features_schema() -> None:
+    """Create the features tables if missing and seed a starter feature."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS features (
+                    id                SERIAL      PRIMARY KEY,
+                    name              TEXT        NOT NULL UNIQUE,
+                    documentation_url TEXT,
+                    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS feature_keywords (
+                    id         SERIAL  PRIMARY KEY,
+                    feature_id INTEGER NOT NULL REFERENCES features (id) ON DELETE CASCADE,
+                    keyword    TEXT    NOT NULL,
+                    UNIQUE (feature_id, keyword)
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_feature_keywords_feature_id
+                ON feature_keywords (feature_id)
+            """)
+
+            # Seed a starter feature only if none exist yet.
+            cur.execute("SELECT COUNT(*) AS n FROM features")
+            if cur.fetchone()["n"] == 0:
+                for feat in SEED_FEATURES:
+                    cur.execute(
+                        "INSERT INTO features (name, documentation_url) VALUES (%s, %s) RETURNING id",
+                        (feat["name"], feat.get("documentation_url")),
+                    )
+                    fid = cur.fetchone()["id"]
+                    kws = _parse_keywords(feat.get("keywords"))
+                    if kws:
+                        psycopg2.extras.execute_values(
+                            cur,
+                            "INSERT INTO feature_keywords (feature_id, keyword) VALUES %s",
+                            [(fid, kw) for kw in kws],
+                        )
+
+
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/features")
+def features_page():
+    return render_template("features.html")
 
 
 @app.route("/api/runs")
@@ -176,6 +242,111 @@ def api_run_comparison():
         keywords=list(active.keys()),
         data=active,
     )
+
+
+# --- Feature management API ---------------------------------------------------
+
+def _fetch_features(cur):
+    """Return all features with their keywords as a list, newest first."""
+    cur.execute("""
+        SELECT id, name, documentation_url, created_at, updated_at
+        FROM features
+        ORDER BY name
+    """)
+    features = [dict(r) for r in cur.fetchall()]
+    cur.execute("SELECT feature_id, keyword FROM feature_keywords ORDER BY keyword")
+    by_feature: dict[int, list[str]] = {}
+    for r in cur.fetchall():
+        by_feature.setdefault(r["feature_id"], []).append(r["keyword"])
+    for f in features:
+        f["keywords"] = by_feature.get(f["id"], [])
+    return features
+
+
+@app.route("/api/features", methods=["GET"])
+def api_list_features():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            return jsonify(_fetch_features(cur))
+
+
+@app.route("/api/features", methods=["POST"])
+def api_create_feature():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify(error="Name is required"), 400
+    doc_url = (data.get("documentation_url") or "").strip() or None
+    keywords = _parse_keywords(data.get("keywords"))
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM features WHERE LOWER(name) = LOWER(%s)", (name,))
+            if cur.fetchone():
+                return jsonify(error=f"A feature named “{name}” already exists"), 409
+            cur.execute(
+                "INSERT INTO features (name, documentation_url) VALUES (%s, %s) RETURNING id",
+                (name, doc_url),
+            )
+            fid = cur.fetchone()["id"]
+            if keywords:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO feature_keywords (feature_id, keyword) VALUES %s",
+                    [(fid, kw) for kw in keywords],
+                )
+    return jsonify(id=fid), 201
+
+
+@app.route("/api/features/<int:feature_id>", methods=["PUT"])
+def api_update_feature(feature_id):
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify(error="Name is required"), 400
+    doc_url = (data.get("documentation_url") or "").strip() or None
+    keywords = _parse_keywords(data.get("keywords"))
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM features WHERE id = %s", (feature_id,))
+            if not cur.fetchone():
+                return jsonify(error="Feature not found"), 404
+            cur.execute(
+                "SELECT 1 FROM features WHERE LOWER(name) = LOWER(%s) AND id <> %s",
+                (name, feature_id),
+            )
+            if cur.fetchone():
+                return jsonify(error=f"A feature named “{name}” already exists"), 409
+
+            cur.execute(
+                "UPDATE features SET name = %s, documentation_url = %s, updated_at = NOW() WHERE id = %s",
+                (name, doc_url, feature_id),
+            )
+            # Replace keyword set.
+            cur.execute("DELETE FROM feature_keywords WHERE feature_id = %s", (feature_id,))
+            if keywords:
+                psycopg2.extras.execute_values(
+                    cur,
+                    "INSERT INTO feature_keywords (feature_id, keyword) VALUES %s",
+                    [(feature_id, kw) for kw in keywords],
+                )
+    return jsonify(id=feature_id)
+
+
+@app.route("/api/features/<int:feature_id>", methods=["DELETE"])
+def api_delete_feature(feature_id):
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM features WHERE id = %s", (feature_id,))
+            if cur.rowcount == 0:
+                return jsonify(error="Feature not found"), 404
+    return jsonify(ok=True)
+
+
+# Ensure the features schema exists whenever the app is imported (e.g. by
+# gunicorn) or run directly.
+init_features_schema()
 
 
 if __name__ == "__main__":

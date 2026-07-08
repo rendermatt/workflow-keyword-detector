@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Features · Keyword Scraper</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #23263a;
+      --border: #2e3148;
+      --accent: #6c63ff;
+      --accent2: #00d4aa;
+      --danger: #ff6384;
+      --text: #e2e8f0;
+      --muted: #8891aa;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    header .brand { display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    nav { display: flex; gap: 4px; margin-left: 12px; }
+    nav a {
+      color: var(--muted);
+      text-decoration: none;
+      font-size: 13px;
+      padding: 6px 12px;
+      border-radius: 8px;
+    }
+    nav a:hover { color: var(--text); background: var(--surface2); }
+    nav a.active { color: var(--text); background: var(--surface2); }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
+
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      gap: 16px;
+    }
+    .toolbar .lead { color: var(--muted); font-size: 13px; }
+    .toolbar .lead strong { color: var(--text); font-weight: 600; }
+
+    button {
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+      border-radius: 8px;
+      border: 1px solid transparent;
+      padding: 8px 14px;
+      transition: background .12s, border-color .12s;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #5a52e0; }
+    .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); }
+    .btn-ghost:hover { background: var(--surface2); }
+    .btn-danger { background: transparent; border-color: var(--border); color: var(--danger); }
+    .btn-danger:hover { background: rgba(255,99,132,.12); border-color: var(--danger); }
+
+    /* Feature cards */
+    .features {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 18px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .fc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .fc-name { font-size: 16px; font-weight: 600; }
+    .fc-count {
+      font-size: 11px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 2px 10px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    .fc-doc a {
+      color: var(--accent2);
+      text-decoration: none;
+      font-size: 13px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      word-break: break-all;
+    }
+    .fc-doc a:hover { text-decoration: underline; }
+    .fc-doc .none { color: var(--muted); font-size: 13px; font-style: italic; }
+
+    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+    .chip {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 3px 9px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .chip.more { color: var(--muted); }
+    .chips-empty { color: var(--muted); font-size: 13px; font-style: italic; }
+
+    .fc-actions { display: flex; gap: 8px; margin-top: 2px; }
+
+    .empty-state {
+      text-align: center;
+      color: var(--muted);
+      padding: 60px 20px;
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+    }
+    .empty-state h2 { color: var(--text); font-size: 16px; margin-bottom: 8px; }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.6);
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 60px 20px;
+      overflow-y: auto;
+      z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 560px;
+      padding: 24px 26px;
+    }
+    .modal h2 { font-size: 17px; margin-bottom: 18px; }
+    .field { margin-bottom: 18px; }
+    .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+    .field .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
+    input[type="text"], input[type="url"], textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      padding: 9px 12px;
+    }
+    input:focus, textarea:focus { outline: none; border-color: var(--accent); }
+    textarea { resize: vertical; min-height: 96px; }
+    .kw-preview { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
+    .modal-error { color: var(--danger); font-size: 13px; margin-bottom: 14px; display: none; }
+    .modal-error.show { display: block; }
+
+    .loading { color: var(--muted); text-align: center; padding: 40px; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round"
+        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    </svg>
+    <h1>Keyword Scraper</h1>
+  </div>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/features" class="active">Features</a>
+  </nav>
+</header>
+
+<div class="container">
+  <div class="toolbar">
+    <div class="lead">
+      Features are the things we look for on a prospect's site to identify a potential user.
+      Each bundles a <strong>documentation link</strong> and a set of <strong>keywords</strong>.
+    </div>
+    <button class="btn-primary" onclick="openModal()">+ Add Feature</button>
+  </div>
+
+  <div id="list"><div class="loading">Loading…</div></div>
+</div>
+
+<!-- Add / Edit modal -->
+<div class="modal-backdrop" id="modal-backdrop">
+  <div class="modal">
+    <h2 id="modal-title">Add Feature</h2>
+    <div class="modal-error" id="modal-error"></div>
+    <form id="feature-form" onsubmit="return false;">
+      <input type="hidden" id="f-id" />
+      <div class="field">
+        <label for="f-name">Name</label>
+        <input type="text" id="f-name" placeholder="e.g. Workflows" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="f-doc">Documentation URL</label>
+        <input type="url" id="f-doc" placeholder="https://render.com/docs/…" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="f-keywords">Keywords</label>
+        <textarea id="f-keywords" placeholder="Separate with commas or new lines&#10;e.g. background job, task queue, cron job"></textarea>
+        <div class="hint">Separate keywords with commas or new lines. Duplicates are removed automatically.</div>
+        <div class="kw-preview" id="kw-preview"></div>
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
+        <button type="button" class="btn-primary" id="save-btn" onclick="save()">Save Feature</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+let features = [];
+
+function parseKeywords(raw) {
+  const seen = new Set(), out = [];
+  raw.split(/[\n,]/).forEach(k => {
+    const t = k.trim();
+    if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); }
+  });
+  return out;
+}
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+
+async function loadFeatures() {
+  const res = await fetch('/api/features');
+  features = await res.json();
+  render();
+}
+
+function render() {
+  const list = document.getElementById('list');
+  if (!features.length) {
+    list.innerHTML = `
+      <div class="empty-state">
+        <h2>No features yet</h2>
+        <p>Add your first feature to start tracking the signals that identify potential users.</p>
+      </div>`;
+    return;
+  }
+  const grid = document.createElement('div');
+  grid.className = 'features';
+  features.forEach(f => {
+    const kws = f.keywords || [];
+    const shown = kws.slice(0, 12);
+    const rest = kws.length - shown.length;
+    const chips = shown.map(k => `<span class="chip">${esc(k)}</span>`).join('')
+      + (rest > 0 ? `<span class="chip more">+${rest} more</span>` : '');
+    const doc = f.documentation_url
+      ? `<a href="${esc(f.documentation_url)}" target="_blank" rel="noopener">
+           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+             <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+           </svg>${esc(f.documentation_url)}</a>`
+      : `<span class="none">No documentation link</span>`;
+
+    const card = document.createElement('div');
+    card.className = 'feature-card';
+    card.innerHTML = `
+      <div class="fc-head">
+        <div class="fc-name">${esc(f.name)}</div>
+        <div class="fc-count">${kws.length} keyword${kws.length === 1 ? '' : 's'}</div>
+      </div>
+      <div class="fc-doc">${doc}</div>
+      <div class="chips">${chips || '<span class="chips-empty">No keywords yet</span>'}</div>
+      <div class="fc-actions">
+        <button class="btn-ghost" data-edit="${f.id}">Edit</button>
+        <button class="btn-danger" data-del="${f.id}">Delete</button>
+      </div>`;
+    grid.appendChild(card);
+  });
+  list.innerHTML = '';
+  list.appendChild(grid);
+
+  grid.querySelectorAll('[data-edit]').forEach(b =>
+    b.onclick = () => openModal(+b.dataset.edit));
+  grid.querySelectorAll('[data-del]').forEach(b =>
+    b.onclick = () => del(+b.dataset.del));
+}
+
+function showError(msg) {
+  const el = document.getElementById('modal-error');
+  el.textContent = msg;
+  el.classList.toggle('show', !!msg);
+}
+
+function openModal(id) {
+  showError('');
+  const f = id ? features.find(x => x.id === id) : null;
+  document.getElementById('modal-title').textContent = f ? 'Edit Feature' : 'Add Feature';
+  document.getElementById('f-id').value = f ? f.id : '';
+  document.getElementById('f-name').value = f ? f.name : '';
+  document.getElementById('f-doc').value = f && f.documentation_url ? f.documentation_url : '';
+  document.getElementById('f-keywords').value = f ? (f.keywords || []).join(', ') : '';
+  updatePreview();
+  document.getElementById('modal-backdrop').classList.add('open');
+  document.getElementById('f-name').focus();
+}
+
+function closeModal() {
+  document.getElementById('modal-backdrop').classList.remove('open');
+}
+
+function updatePreview() {
+  const kws = parseKeywords(document.getElementById('f-keywords').value);
+  document.getElementById('kw-preview').innerHTML =
+    kws.map(k => `<span class="chip">${esc(k)}</span>`).join('');
+}
+document.getElementById('f-keywords').addEventListener('input', updatePreview);
+
+async function save() {
+  const id = document.getElementById('f-id').value;
+  const payload = {
+    name: document.getElementById('f-name').value.trim(),
+    documentation_url: document.getElementById('f-doc').value.trim(),
+    keywords: parseKeywords(document.getElementById('f-keywords').value),
+  };
+  if (!payload.name) { showError('Name is required.'); return; }
+
+  const btn = document.getElementById('save-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(id ? `/api/features/${id}` : '/api/features', {
+      method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      showError(err.error || 'Something went wrong.');
+      return;
+    }
+    closeModal();
+    await loadFeatures();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function del(id) {
+  const f = features.find(x => x.id === id);
+  if (!confirm(`Delete “${f ? f.name : 'this feature'}” and all its keywords?`)) return;
+  const res = await fetch(`/api/features/${id}`, { method: 'DELETE' });
+  if (res.ok) await loadFeatures();
+  else alert('Failed to delete feature.');
+}
+
+// Close modal on backdrop click / Escape
+document.getElementById('modal-backdrop').addEventListener('click', e => {
+  if (e.target.id === 'modal-backdrop') closeModal();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+loadFeatures().catch(err => {
+  console.error(err);
+  document.getElementById('list').innerHTML =
+    '<div class="empty-state"><h2>Couldn\'t load features</h2><p>Check the server logs.</p></div>';
+});
+</script>
+</body>
+</html>
