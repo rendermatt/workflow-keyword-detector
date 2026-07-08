@@ -1,7 +1,7 @@
 # Exported from Render on 2026-05-20T19:27:53Z
 version: "1"
 projects:
-- name: My project
+- name: Usecase Detector
   environments:
   - name: Production
     services:
@@ -10,7 +10,6 @@ projects:
         generation: automatic
       name: workflow-keyword-detector
       runtime: python
-      repo: https://github.com/Mattrender/workflow-keyword-detector
       plan: starter
       envVars:
       - key: DATABASE_URL
@@ -28,8 +27,5 @@ projects:
       user: workflowsdb_user
       plan: basic-256mb
       region: oregon
-      ipAllowList:
-      - source: 172.56.195.239/32
-        description: Matt Bemis (matt.bemis@render.com)
       postgresMajorVersion: "18"
       diskSizeGB: 1
