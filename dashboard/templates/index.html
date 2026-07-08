@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Keyword Scraper Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #23263a;
+      --border: #2e3148;
+      --accent: #6c63ff;
+      --accent2: #00d4aa;
+      --text: #e2e8f0;
+      --muted: #8891aa;
+      --hit: #6c63ff;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    header h1 { font-size: 18px; font-weight: 600; }
+    header span { color: var(--muted); font-size: 13px; }
+
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
+
+    /* Summary cards */
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+    }
+    .card-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    .card-value { font-size: 28px; font-weight: 700; color: var(--accent); }
+
+    /* Section */
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .section-title .badge {
+      font-size: 11px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 99px;
+      padding: 2px 10px;
+      color: var(--muted);
+      font-weight: 400;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-bottom: 28px;
+    }
+    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+    }
+
+    .chart-wrap { position: relative; }
+    .chart-wrap canvas { max-height: 380px; }
+
+    /* Heatmap */
+    .heatmap-scroll { overflow-x: auto; margin-top: 8px; }
+    table.heatmap {
+      border-collapse: collapse;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    table.heatmap th {
+      padding: 4px 10px;
+      color: var(--muted);
+      font-weight: 500;
+      text-align: left;
+      position: sticky;
+      top: 0;
+      background: var(--surface);
+    }
+    table.heatmap th.col-head {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      padding: 10px 4px;
+      max-width: 28px;
+      text-align: left;
+    }
+    table.heatmap td {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+    }
+    table.heatmap td.url-cell {
+      font-size: 12px;
+      color: var(--muted);
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      position: sticky;
+      left: 0;
+      background: var(--surface);
+      z-index: 1;
+    }
+    table.heatmap td.count-cell {
+      text-align: center;
+      min-width: 28px;
+      font-weight: 600;
+    }
+
+    /* Run comparison */
+    .runs-full { margin-bottom: 28px; }
+
+    /* Loading / empty */
+    .loading {
+      color: var(--muted);
+      text-align: center;
+      padding: 40px;
+      font-size: 13px;
+    }
+
+    /* Runs list */
+    .runs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .runs-table th {
+      text-align: left;
+      padding: 8px 12px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      font-weight: 500;
+    }
+    .runs-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+    .runs-table tr:last-child td { border-bottom: none; }
+    .pill {
+      display: inline-block;
+      background: var(--surface2);
+      border-radius: 99px;
+      padding: 2px 10px;
+      font-size: 11px;
+      color: var(--accent2);
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+    <path stroke-linecap="round" stroke-linejoin="round"
+      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+  </svg>
+  <h1>Keyword Scraper</h1>
+  <span>Workflow &amp; AI keyword detection dashboard</span>
+</header>
+
+<div class="container">
+
+  <!-- Summary cards -->
+  <div class="cards" id="cards">
+    <div class="card"><div class="card-label">Runs</div><div class="card-value" id="c-runs">—</div></div>
+    <div class="card"><div class="card-label">URLs Scraped</div><div class="card-value" id="c-urls">—</div></div>
+    <div class="card"><div class="card-label">Keywords Tracked</div><div class="card-value" id="c-keywords">—</div></div>
+    <div class="card"><div class="card-label">Total Hits</div><div class="card-value" id="c-hits">—</div></div>
+  </div>
+
+  <!-- Top Keywords + Top URLs -->
+  <div class="grid-2">
+    <div class="panel">
+      <div class="section-title">Top Keywords <span class="badge">by total hits</span></div>
+      <div class="chart-wrap"><canvas id="chart-keywords"></canvas></div>
+    </div>
+    <div class="panel">
+      <div class="section-title">Top URLs <span class="badge">by total hits</span></div>
+      <div class="chart-wrap"><canvas id="chart-urls"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Run comparison -->
+  <div class="panel runs-full" id="comparison-panel">
+    <div class="section-title">Keyword Hits by Run <span class="badge">only keywords with hits</span></div>
+    <div class="chart-wrap"><canvas id="chart-comparison" style="max-height:420px"></canvas></div>
+  </div>
+
+  <!-- Heatmap -->
+  <div class="panel" style="margin-bottom:28px">
+    <div class="section-title">URL × Keyword Heatmap <span class="badge">only hits &gt; 0</span></div>
+    <div class="heatmap-scroll" id="heatmap-container">
+      <div class="loading">Loading…</div>
+    </div>
+  </div>
+
+  <!-- Runs table -->
+  <div class="panel" style="margin-bottom:28px">
+    <div class="section-title">All Runs</div>
+    <div id="runs-container"><div class="loading">Loading…</div></div>
+  </div>
+
+</div>
+
+<script>
+const PALETTE = [
+  '#6c63ff','#00d4aa','#ff6384','#ffcd56','#36a2eb','#ff9f40',
+  '#4bc0c0','#9966ff','#ff6384','#c9cbcf',
+];
+
+function hsl(value, max) {
+  if (value === 0) return 'transparent';
+  const t = Math.min(value / max, 1);
+  const h = 260 - t * 60; // purple → blue-green as intensity rises
+  const s = 60 + t * 30;
+  const l = 20 + t * 35;
+  return `hsl(${h}, ${s}%, ${l}%)`;
+}
+
+async function load() {
+  const [summary, keywords, urls, heatmap, runs, comparison] = await Promise.all([
+    fetch('/api/summary').then(r => r.json()),
+    fetch('/api/keywords').then(r => r.json()),
+    fetch('/api/urls').then(r => r.json()),
+    fetch('/api/heatmap').then(r => r.json()),
+    fetch('/api/runs').then(r => r.json()),
+    fetch('/api/run_comparison').then(r => r.json()),
+  ]);
+
+  // Summary cards
+  document.getElementById('c-runs').textContent = summary.total_runs;
+  document.getElementById('c-urls').textContent = summary.total_urls;
+  document.getElementById('c-keywords').textContent = summary.total_keywords;
+  document.getElementById('c-hits').textContent = summary.total_hits;
+
+  // Keywords chart (horizontal bar, top 20 with hits then top without)
+  const kwTop = keywords.filter(k => k.total > 0).slice(0, 20);
+  if (kwTop.length === 0) {
+    // Show all, even zeros
+    keywords.slice(0, 20).forEach(k => kwTop.push(k));
+  }
+  new Chart(document.getElementById('chart-keywords'), {
+    type: 'bar',
+    data: {
+      labels: kwTop.map(k => k.keyword),
+      datasets: [{
+        label: 'Total hits',
+        data: kwTop.map(k => k.total),
+        backgroundColor: kwTop.map((_, i) => PALETTE[i % PALETTE.length] + 'cc'),
+        borderColor: kwTop.map((_, i) => PALETTE[i % PALETTE.length]),
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: { callbacks: {
+        label: ctx => ` ${ctx.parsed.x} hits`
+      }}},
+      scales: {
+        x: { ticks: { color: '#8891aa' }, grid: { color: '#2e3148' } },
+        y: { ticks: { color: '#e2e8f0', font: { size: 12 } }, grid: { display: false } },
+      },
+    },
+  });
+
+  // URLs chart (top 15)
+  const urlTop = urls.slice(0, 15);
+  const urlLabels = urlTop.map(u => {
+    try { return new URL(u.url).hostname.replace(/^www\./, ''); } catch { return u.url; }
+  });
+  new Chart(document.getElementById('chart-urls'), {
+    type: 'bar',
+    data: {
+      labels: urlLabels,
+      datasets: [{
+        label: 'Total hits',
+        data: urlTop.map(u => u.total),
+        backgroundColor: urlTop.map((_, i) => PALETTE[(i + 3) % PALETTE.length] + 'cc'),
+        borderColor: urlTop.map((_, i) => PALETTE[(i + 3) % PALETTE.length]),
+        borderWidth: 1,
+        borderRadius: 4,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      plugins: { legend: { display: false }, tooltip: {
+        callbacks: {
+          title: ctx => urlTop[ctx[0].dataIndex].url,
+          label: ctx => ` ${ctx.parsed.x} hits`,
+        }
+      }},
+      scales: {
+        x: { ticks: { color: '#8891aa' }, grid: { color: '#2e3148' } },
+        y: { ticks: { color: '#e2e8f0', font: { size: 12 } }, grid: { display: false } },
+      },
+    },
+  });
+
+  // Run comparison chart
+  if (comparison.run_ids.length > 1) {
+    const compKws = comparison.keywords.slice(0, 20);
+    const datasets = comparison.run_ids.map((rid, i) => ({
+      label: comparison.run_labels[rid] || rid.slice(0, 8),
+      data: compKws.map(kw => comparison.data[kw]?.[rid] ?? 0),
+      backgroundColor: PALETTE[i % PALETTE.length] + 'cc',
+      borderColor: PALETTE[i % PALETTE.length],
+      borderWidth: 1,
+      borderRadius: 3,
+    }));
+    new Chart(document.getElementById('chart-comparison'), {
+      type: 'bar',
+      data: { labels: compKws, datasets },
+      options: {
+        responsive: true,
+        plugins: { legend: { labels: { color: '#e2e8f0' } } },
+        scales: {
+          x: { ticks: { color: '#e2e8f0', maxRotation: 45 }, grid: { color: '#2e3148' } },
+          y: { ticks: { color: '#8891aa' }, grid: { color: '#2e3148' } },
+        },
+      },
+    });
+  } else {
+    document.getElementById('comparison-panel').style.display = 'none';
+  }
+
+  // Heatmap
+  const { urls: hmUrls, keywords: hmKws, matrix } = heatmap;
+  const container = document.getElementById('heatmap-container');
+  if (!hmUrls.length) {
+    container.innerHTML = '<div class="loading">No keyword hits found yet.</div>';
+  } else {
+    const maxVal = Math.max(...matrix.flat());
+    const table = document.createElement('table');
+    table.className = 'heatmap';
+
+    // Header row
+    const thead = table.createTHead();
+    const hRow = thead.insertRow();
+    const corner = document.createElement('th');
+    corner.textContent = 'URL';
+    hRow.appendChild(corner);
+    hmKws.forEach(kw => {
+      const th = document.createElement('th');
+      th.className = 'col-head';
+      th.textContent = kw;
+      hRow.appendChild(th);
+    });
+
+    // Data rows
+    const tbody = table.createTBody();
+    hmUrls.forEach((url, ri) => {
+      const row = tbody.insertRow();
+      const urlCell = row.insertCell();
+      urlCell.className = 'url-cell';
+      try { urlCell.textContent = new URL(url).hostname.replace(/^www\./, ''); } catch { urlCell.textContent = url; }
+      urlCell.title = url;
+
+      matrix[ri].forEach(val => {
+        const td = row.insertCell();
+        td.className = 'count-cell';
+        td.style.background = hsl(val, maxVal);
+        td.style.color = val > 0 ? '#fff' : 'transparent';
+        td.textContent = val > 0 ? val : '·';
+      });
+    });
+
+    container.innerHTML = '';
+    container.appendChild(table);
+  }
+
+  // Runs table
+  const runsDiv = document.getElementById('runs-container');
+  const table2 = document.createElement('table');
+  table2.className = 'runs-table';
+  table2.innerHTML = `<thead><tr>
+    <th>Run ID</th><th>Started</th><th>Finished</th>
+    <th>URLs</th><th>Keywords</th><th>Total Hits</th>
+  </tr></thead>`;
+  const tbody2 = table2.createTBody();
+  runs.forEach(r => {
+    const tr = tbody2.insertRow();
+    const fmt = d => new Date(d).toLocaleString();
+    tr.innerHTML = `
+      <td><span class="pill">${r.run_id.slice(0, 8)}…</span></td>
+      <td>${fmt(r.started_at)}</td>
+      <td>${fmt(r.finished_at)}</td>
+      <td>${r.urls_scraped}</td>
+      <td>${r.keywords_tracked}</td>
+      <td><strong>${r.total_hits}</strong></td>
+    `;
+  });
+  runsDiv.innerHTML = '';
+  runsDiv.appendChild(table2);
+}
+
+load().catch(err => console.error('Dashboard load error:', err));
+</script>
+</body>
+</html>
