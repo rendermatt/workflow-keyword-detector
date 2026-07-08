@@ -3,11 +3,18 @@
 
 CREATE TABLE IF NOT EXISTS scrape_results (
     id         SERIAL      PRIMARY KEY,
-    run_id     TEXT        NOT NULL,          -- UUID grouping all URLs in one trigger
+    run_id     TEXT        NOT NULL,          -- UUID of the run that last wrote this row
+    feature_id INTEGER,                       -- feature this keyword belongs to (NULL until the scraper is feature-aware)
     url        TEXT        NOT NULL,
     keyword    TEXT        NOT NULL,
     count      INTEGER     NOT NULL,
-    scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Latest-snapshot semantics: re-scraping the same feature/url/keyword
+    -- upserts the existing row instead of appending, so hits are never double
+    -- counted. NULLS NOT DISTINCT makes a NULL feature_id dedupe on (url,
+    -- keyword) today, and tighten to per-feature grain once feature_id is set.
+    CONSTRAINT scrape_results_feature_url_keyword_key
+        UNIQUE NULLS NOT DISTINCT (feature_id, url, keyword)
 );
 
 CREATE INDEX IF NOT EXISTS idx_scrape_results_run_id  ON scrape_results (run_id);

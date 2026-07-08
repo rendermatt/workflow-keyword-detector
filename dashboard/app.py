@@ -83,56 +83,58 @@ def features_page():
     return render_template("features.html")
 
 
-@app.route("/api/runs")
-def api_runs():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT run_id,
-                       MIN(scraped_at) AS started_at,
-                       MAX(scraped_at) AS finished_at,
-                       COUNT(DISTINCT url) AS urls_scraped,
-                       COUNT(DISTINCT keyword) AS keywords_tracked,
-                       SUM(count) AS total_hits
-                FROM scrape_results
-                GROUP BY run_id
-                ORDER BY started_at DESC
-            """)
-            rows = cur.fetchall()
-    return jsonify([dict(r) for r in rows])
+def _feature_filter():
+    """Read an optional ?feature_id from the request and return a
+    (sql_condition, params) pair that constrains scrape_results rows to keywords
+    belonging to that feature. With no feature selected it is a no-op ("TRUE").
+
+    Designed to be dropped into a WHERE clause, e.g.
+        f_cond, f_params = _feature_filter()
+        cur.execute(f"... WHERE {f_cond} ...", f_params)
+    """
+    feature_id = request.args.get("feature_id", type=int)
+    if feature_id:
+        return (
+            "keyword IN (SELECT keyword FROM feature_keywords WHERE feature_id = %s)",
+            [feature_id],
+        )
+    return ("TRUE", [])
 
 
 @app.route("/api/summary")
 def api_summary():
+    f_cond, f_params = _feature_filter()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COUNT(DISTINCT run_id) FROM scrape_results")
-            total_runs = cur.fetchone()["count"]
-            cur.execute("SELECT COUNT(DISTINCT url) FROM scrape_results")
+            cur.execute(f"SELECT COUNT(DISTINCT url) FROM scrape_results WHERE {f_cond}", f_params)
             total_urls = cur.fetchone()["count"]
-            cur.execute("SELECT COUNT(DISTINCT keyword) FROM scrape_results")
+            cur.execute(f"SELECT COUNT(DISTINCT keyword) FROM scrape_results WHERE {f_cond}", f_params)
             total_keywords = cur.fetchone()["count"]
-            cur.execute("SELECT SUM(count) FROM scrape_results")
+            cur.execute(f"SELECT SUM(count) FROM scrape_results WHERE {f_cond}", f_params)
             total_hits = cur.fetchone()["sum"] or 0
+            cur.execute(f"SELECT MAX(scraped_at) AS last_run FROM scrape_results WHERE {f_cond}", f_params)
+            last_run = cur.fetchone()["last_run"]
     return jsonify(
-        total_runs=total_runs,
         total_urls=total_urls,
         total_keywords=total_keywords,
         total_hits=total_hits,
+        last_run_at=last_run.isoformat() if last_run else None,
     )
 
 
 @app.route("/api/keywords")
 def api_keywords():
     """Top keywords by total hit count across all runs."""
+    f_cond, f_params = _feature_filter()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT keyword, SUM(count) AS total
                 FROM scrape_results
+                WHERE {f_cond}
                 GROUP BY keyword
                 ORDER BY total DESC, keyword
-            """)
+            """, f_params)
             rows = cur.fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -140,15 +142,17 @@ def api_keywords():
 @app.route("/api/urls")
 def api_urls():
     """Top URLs by total hit count across all runs."""
+    f_cond, f_params = _feature_filter()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("""
+            cur.execute(f"""
                 SELECT url, SUM(count) AS total
                 FROM scrape_results
+                WHERE {f_cond}
                 GROUP BY url
                 ORDER BY total DESC, url
                 LIMIT 30
-            """)
+            """, f_params)
             rows = cur.fetchall()
     return jsonify([dict(r) for r in rows])
 
@@ -159,24 +163,25 @@ def api_heatmap():
     Returns a matrix of url × keyword counts (only rows/cols with any hit).
     Shape: { urls: [...], keywords: [...], matrix: [[count, ...], ...] }
     """
+    f_cond, f_params = _feature_filter()
     with get_conn() as conn:
         with conn.cursor() as cur:
             # Only URLs that had at least one hit
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DISTINCT url
                 FROM scrape_results
-                WHERE count > 0
+                WHERE count > 0 AND {f_cond}
                 ORDER BY url
-            """)
+            """, f_params)
             urls = [r["url"] for r in cur.fetchall()]
 
             # Only keywords that had at least one hit
-            cur.execute("""
+            cur.execute(f"""
                 SELECT DISTINCT keyword
                 FROM scrape_results
-                WHERE count > 0
+                WHERE count > 0 AND {f_cond}
                 ORDER BY keyword
-            """)
+            """, f_params)
             keywords = [r["keyword"] for r in cur.fetchall()]
 
             if not urls or not keywords:
@@ -196,52 +201,6 @@ def api_heatmap():
         for url in urls
     ]
     return jsonify(urls=urls, keywords=keywords, matrix=matrix)
-
-
-@app.route("/api/run_comparison")
-def api_run_comparison():
-    """Per-keyword totals broken out by run_id."""
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT run_id, MIN(scraped_at) AS started_at
-                FROM scrape_results
-                GROUP BY run_id
-                ORDER BY started_at
-            """)
-            runs = [dict(r) for r in cur.fetchall()]
-
-            cur.execute("""
-                SELECT keyword, run_id, SUM(count) AS total
-                FROM scrape_results
-                GROUP BY keyword, run_id
-                ORDER BY keyword
-            """)
-            rows = cur.fetchall()
-
-    run_ids = [r["run_id"] for r in runs]
-    run_labels = {
-        r["run_id"]: r["started_at"].strftime("%b %d %H:%M") for r in runs
-    }
-
-    by_keyword: dict[str, dict] = {}
-    for r in rows:
-        kw = r["keyword"]
-        if kw not in by_keyword:
-            by_keyword[kw] = {rid: 0 for rid in run_ids}
-        by_keyword[kw][r["run_id"]] = int(r["total"])
-
-    # Only keywords with at least one hit in any run
-    active = {kw: v for kw, v in by_keyword.items() if sum(v.values()) > 0}
-    # Sort by total descending
-    active = dict(sorted(active.items(), key=lambda x: -sum(x[1].values())))
-
-    return jsonify(
-        run_ids=run_ids,
-        run_labels=run_labels,
-        keywords=list(active.keys()),
-        data=active,
-    )
 
 
 # --- Feature management API ---------------------------------------------------

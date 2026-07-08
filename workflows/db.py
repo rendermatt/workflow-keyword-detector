@@ -25,17 +25,29 @@ def _cursor():
         conn.close()
 
 
+_UNIQUE_CONSTRAINT = "scrape_results_feature_url_keyword_key"
+
+
 def init_db() -> None:
-    """Create tables if they don't exist. Called once per process_csvs run."""
+    """Create tables if they don't exist and migrate older tables in place.
+
+    Called once per process_csvs run. Enforces latest-snapshot semantics: one
+    row per (feature_id, url, keyword), so re-scraping upserts rather than
+    appending and hits are never double counted.
+    """
     with _cursor() as cur:
+        # Fresh installs get the full definition, including the unique key.
         cur.execute("""
             CREATE TABLE IF NOT EXISTS scrape_results (
                 id         SERIAL PRIMARY KEY,
                 run_id     TEXT        NOT NULL,
+                feature_id INTEGER,
                 url        TEXT        NOT NULL,
                 keyword    TEXT        NOT NULL,
                 count      INTEGER     NOT NULL,
-                scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                scraped_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT scrape_results_feature_url_keyword_key
+                    UNIQUE NULLS NOT DISTINCT (feature_id, url, keyword)
             )
         """)
         cur.execute("""
@@ -46,6 +58,26 @@ def init_db() -> None:
             CREATE INDEX IF NOT EXISTS idx_scrape_results_keyword
             ON scrape_results (keyword)
         """)
+
+        # Migrate pre-existing tables that predate feature_id / the unique key.
+        cur.execute("ALTER TABLE scrape_results ADD COLUMN IF NOT EXISTS feature_id INTEGER")
+        cur.execute("SELECT 1 FROM pg_constraint WHERE conname = %s", (_UNIQUE_CONSTRAINT,))
+        if not cur.fetchone():
+            # Collapse historical duplicates, keeping the most recent row
+            # (highest id) per key, before the unique constraint can be added.
+            cur.execute("""
+                DELETE FROM scrape_results a
+                USING scrape_results b
+                WHERE a.id < b.id
+                  AND a.url = b.url
+                  AND a.keyword = b.keyword
+                  AND a.feature_id IS NOT DISTINCT FROM b.feature_id
+            """)
+            cur.execute(f"""
+                ALTER TABLE scrape_results
+                ADD CONSTRAINT {_UNIQUE_CONSTRAINT}
+                UNIQUE NULLS NOT DISTINCT (feature_id, url, keyword)
+            """)
     logger.info("Database ready")
 
 
@@ -59,16 +91,25 @@ def save_result(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
 
 
 def _save_result_db(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
-    rows = [(run_id, url, kw, cnt) for kw, cnt in keyword_counts.items()]
+    # feature_id is NULL until the scraper is made feature-aware; NULLS NOT
+    # DISTINCT on the unique key means this upserts on (url, keyword) today.
+    rows = [(run_id, None, url, kw, cnt) for kw, cnt in keyword_counts.items()]
     if not rows:
         return
     with _cursor() as cur:
         psycopg2.extras.execute_values(
             cur,
-            "INSERT INTO scrape_results (run_id, url, keyword, count) VALUES %s",
+            """
+            INSERT INTO scrape_results (run_id, feature_id, url, keyword, count)
+            VALUES %s
+            ON CONFLICT ON CONSTRAINT scrape_results_feature_url_keyword_key
+            DO UPDATE SET count      = EXCLUDED.count,
+                          run_id     = EXCLUDED.run_id,
+                          scraped_at = NOW()
+            """,
             rows,
         )
-    logger.info(f"Saved {len(rows)} rows for {url}")
+    logger.info(f"Upserted {len(rows)} rows for {url}")
 
 
 _CSV_COLUMNS = ["run_id", "url", "keyword", "count", "scraped_at"]

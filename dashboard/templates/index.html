@@ -48,6 +48,24 @@
     }
     header nav a:hover { color: var(--text); background: var(--surface2); }
     header nav a.active { color: var(--text); background: var(--surface2); }
+    .feature-select { display: flex; align-items: center; gap: 8px; }
+    .feature-select label {
+      font-size: 12px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: .04em;
+    }
+    .feature-select select {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 13px;
+      padding: 7px 12px;
+      cursor: pointer;
+    }
+    .feature-select select:focus { outline: none; border-color: var(--accent); }
 
     .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
 
@@ -66,6 +84,7 @@
     }
     .card-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
     .card-value { font-size: 28px; font-weight: 700; color: var(--accent); }
+    .card-value.card-value-sm { font-size: 17px; font-weight: 600; }
 
     /* Section */
     .section-title {
@@ -195,16 +214,22 @@
     <a href="/" class="active">Dashboard</a>
     <a href="/features">Features</a>
   </nav>
+  <div class="feature-select">
+    <label for="feature-filter">Feature</label>
+    <select id="feature-filter">
+      <option value="">All features</option>
+    </select>
+  </div>
 </header>
 
 <div class="container">
 
   <!-- Summary cards -->
   <div class="cards" id="cards">
-    <div class="card"><div class="card-label">Runs</div><div class="card-value" id="c-runs">—</div></div>
     <div class="card"><div class="card-label">URLs Scraped</div><div class="card-value" id="c-urls">—</div></div>
     <div class="card"><div class="card-label">Keywords Tracked</div><div class="card-value" id="c-keywords">—</div></div>
     <div class="card"><div class="card-label">Total Hits</div><div class="card-value" id="c-hits">—</div></div>
+    <div class="card"><div class="card-label">Last Run</div><div class="card-value card-value-sm" id="c-lastrun">—</div></div>
   </div>
 
   <!-- Top Keywords + Top URLs -->
@@ -219,24 +244,12 @@
     </div>
   </div>
 
-  <!-- Run comparison -->
-  <div class="panel runs-full" id="comparison-panel">
-    <div class="section-title">Keyword Hits by Run <span class="badge">only keywords with hits</span></div>
-    <div class="chart-wrap"><canvas id="chart-comparison" style="max-height:420px"></canvas></div>
-  </div>
-
   <!-- Heatmap -->
   <div class="panel" style="margin-bottom:28px">
     <div class="section-title">URL × Keyword Heatmap <span class="badge">only hits &gt; 0</span></div>
     <div class="heatmap-scroll" id="heatmap-container">
       <div class="loading">Loading…</div>
     </div>
-  </div>
-
-  <!-- Runs table -->
-  <div class="panel" style="margin-bottom:28px">
-    <div class="section-title">All Runs</div>
-    <div id="runs-container"><div class="loading">Loading…</div></div>
   </div>
 
 </div>
@@ -256,21 +269,50 @@ function hsl(value, max) {
   return `hsl(${h}, ${s}%, ${l}%)`;
 }
 
+// Selected feature filter, appended to every API request.
+function featureQuery() {
+  const id = document.getElementById('feature-filter').value;
+  return id ? `?feature_id=${encodeURIComponent(id)}` : '';
+}
+
+// Track live Chart.js instances so we can tear them down before redrawing.
+const charts = {};
+function drawChart(key, canvasId, config) {
+  if (charts[key]) charts[key].destroy();
+  charts[key] = new Chart(document.getElementById(canvasId), config);
+}
+
+// Populate the feature dropdown once on startup.
+async function loadFeatureOptions() {
+  try {
+    const features = await fetch('/api/features').then(r => r.json());
+    const sel = document.getElementById('feature-filter');
+    features.forEach(f => {
+      const opt = document.createElement('option');
+      opt.value = f.id;
+      opt.textContent = f.name;
+      sel.appendChild(opt);
+    });
+  } catch (err) {
+    console.error('Failed to load feature options:', err);
+  }
+}
+
 async function load() {
-  const [summary, keywords, urls, heatmap, runs, comparison] = await Promise.all([
-    fetch('/api/summary').then(r => r.json()),
-    fetch('/api/keywords').then(r => r.json()),
-    fetch('/api/urls').then(r => r.json()),
-    fetch('/api/heatmap').then(r => r.json()),
-    fetch('/api/runs').then(r => r.json()),
-    fetch('/api/run_comparison').then(r => r.json()),
+  const q = featureQuery();
+  const [summary, keywords, urls, heatmap] = await Promise.all([
+    fetch('/api/summary' + q).then(r => r.json()),
+    fetch('/api/keywords' + q).then(r => r.json()),
+    fetch('/api/urls' + q).then(r => r.json()),
+    fetch('/api/heatmap' + q).then(r => r.json()),
   ]);
 
   // Summary cards
-  document.getElementById('c-runs').textContent = summary.total_runs;
   document.getElementById('c-urls').textContent = summary.total_urls;
   document.getElementById('c-keywords').textContent = summary.total_keywords;
   document.getElementById('c-hits').textContent = summary.total_hits;
+  document.getElementById('c-lastrun').textContent =
+    summary.last_run_at ? new Date(summary.last_run_at).toLocaleString() : 'No runs yet';
 
   // Keywords chart (horizontal bar, top 20 with hits then top without)
   const kwTop = keywords.filter(k => k.total > 0).slice(0, 20);
@@ -278,7 +320,7 @@ async function load() {
     // Show all, even zeros
     keywords.slice(0, 20).forEach(k => kwTop.push(k));
   }
-  new Chart(document.getElementById('chart-keywords'), {
+  drawChart('keywords', 'chart-keywords', {
     type: 'bar',
     data: {
       labels: kwTop.map(k => k.keyword),
@@ -309,7 +351,7 @@ async function load() {
   const urlLabels = urlTop.map(u => {
     try { return new URL(u.url).hostname.replace(/^www\./, ''); } catch { return u.url; }
   });
-  new Chart(document.getElementById('chart-urls'), {
+  drawChart('urls', 'chart-urls', {
     type: 'bar',
     data: {
       labels: urlLabels,
@@ -337,33 +379,6 @@ async function load() {
       },
     },
   });
-
-  // Run comparison chart
-  if (comparison.run_ids.length > 1) {
-    const compKws = comparison.keywords.slice(0, 20);
-    const datasets = comparison.run_ids.map((rid, i) => ({
-      label: comparison.run_labels[rid] || rid.slice(0, 8),
-      data: compKws.map(kw => comparison.data[kw]?.[rid] ?? 0),
-      backgroundColor: PALETTE[i % PALETTE.length] + 'cc',
-      borderColor: PALETTE[i % PALETTE.length],
-      borderWidth: 1,
-      borderRadius: 3,
-    }));
-    new Chart(document.getElementById('chart-comparison'), {
-      type: 'bar',
-      data: { labels: compKws, datasets },
-      options: {
-        responsive: true,
-        plugins: { legend: { labels: { color: '#e2e8f0' } } },
-        scales: {
-          x: { ticks: { color: '#e2e8f0', maxRotation: 45 }, grid: { color: '#2e3148' } },
-          y: { ticks: { color: '#8891aa' }, grid: { color: '#2e3148' } },
-        },
-      },
-    });
-  } else {
-    document.getElementById('comparison-panel').style.display = 'none';
-  }
 
   // Heatmap
   const { urls: hmUrls, keywords: hmKws, matrix } = heatmap;
@@ -409,33 +424,15 @@ async function load() {
     container.innerHTML = '';
     container.appendChild(table);
   }
-
-  // Runs table
-  const runsDiv = document.getElementById('runs-container');
-  const table2 = document.createElement('table');
-  table2.className = 'runs-table';
-  table2.innerHTML = `<thead><tr>
-    <th>Run ID</th><th>Started</th><th>Finished</th>
-    <th>URLs</th><th>Keywords</th><th>Total Hits</th>
-  </tr></thead>`;
-  const tbody2 = table2.createTBody();
-  runs.forEach(r => {
-    const tr = tbody2.insertRow();
-    const fmt = d => new Date(d).toLocaleString();
-    tr.innerHTML = `
-      <td><span class="pill">${r.run_id.slice(0, 8)}…</span></td>
-      <td>${fmt(r.started_at)}</td>
-      <td>${fmt(r.finished_at)}</td>
-      <td>${r.urls_scraped}</td>
-      <td>${r.keywords_tracked}</td>
-      <td><strong>${r.total_hits}</strong></td>
-    `;
-  });
-  runsDiv.innerHTML = '';
-  runsDiv.appendChild(table2);
 }
 
-load().catch(err => console.error('Dashboard load error:', err));
+document.getElementById('feature-filter').addEventListener('change', () => {
+  load().catch(err => console.error('Dashboard reload error:', err));
+});
+
+loadFeatureOptions()
+  .then(() => load())
+  .catch(err => console.error('Dashboard load error:', err));
 </script>
 </body>
 </html>
