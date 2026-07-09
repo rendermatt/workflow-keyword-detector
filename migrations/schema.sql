@@ -27,13 +27,14 @@ CREATE INDEX IF NOT EXISTS idx_scrape_results_keyword ON scrape_results (keyword
 -- records every path/subdomain reached and whether the fetch succeeded.
 
 CREATE TABLE IF NOT EXISTS crawled_pages (
-    id          SERIAL      PRIMARY KEY,
-    run_id      TEXT        NOT NULL,
-    domain      TEXT        NOT NULL,          -- registrable domain of the seed
-    url         TEXT        NOT NULL UNIQUE,   -- specific page URL crawled
-    ok          BOOLEAN     NOT NULL DEFAULT TRUE,
-    status_code INTEGER,
-    crawled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id             SERIAL      PRIMARY KEY,
+    run_id         TEXT        NOT NULL,
+    domain         TEXT        NOT NULL,          -- registrable domain of the seed
+    url            TEXT        NOT NULL UNIQUE,   -- specific page URL crawled
+    ok             BOOLEAN     NOT NULL DEFAULT TRUE,
+    status_code    INTEGER,
+    blocked_reason TEXT,                          -- Cloudflare 403 signal: 'cf-mitigated' / 'cf-access-domain'
+    crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain);

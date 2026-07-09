@@ -64,19 +64,22 @@ def init_db() -> None:
         # coverage (how many pages per domain, which paths/subdomains).
         cur.execute("""
             CREATE TABLE IF NOT EXISTS crawled_pages (
-                id          SERIAL      PRIMARY KEY,
-                run_id      TEXT        NOT NULL,
-                domain      TEXT        NOT NULL,   -- registrable domain of the seed
-                url         TEXT        NOT NULL UNIQUE,
-                ok          BOOLEAN     NOT NULL DEFAULT TRUE,
-                status_code INTEGER,
-                crawled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                id             SERIAL      PRIMARY KEY,
+                run_id         TEXT        NOT NULL,
+                domain         TEXT        NOT NULL,   -- registrable domain of the seed
+                url            TEXT        NOT NULL UNIQUE,
+                ok             BOOLEAN     NOT NULL DEFAULT TRUE,
+                status_code    INTEGER,
+                blocked_reason TEXT,                   -- e.g. 'cf-mitigated' on a Cloudflare 403
+                crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain
             ON crawled_pages (domain)
         """)
+        # Migrate tables created before blocked_reason existed.
+        cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
 
         # Migrate pre-existing tables that predate feature_id / the unique key.
         cur.execute("ALTER TABLE scrape_results ADD COLUMN IF NOT EXISTS feature_id INTEGER")
@@ -110,7 +113,12 @@ def save_result(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
 
 
 def record_page(
-    run_id: str, domain: str, url: str, ok: bool, status_code: int | None
+    run_id: str,
+    domain: str,
+    url: str,
+    ok: bool,
+    status_code: int | None,
+    blocked_reason: str | None = None,
 ) -> None:
     """Upsert a crawled page into crawled_pages (skipped in local CSV mode)."""
     if os.environ.get("LOCAL_OUTPUT_CSV"):
@@ -118,16 +126,17 @@ def record_page(
     with _cursor() as cur:
         cur.execute(
             """
-            INSERT INTO crawled_pages (run_id, domain, url, ok, status_code)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO crawled_pages (run_id, domain, url, ok, status_code, blocked_reason)
+            VALUES (%s, %s, %s, %s, %s, %s)
             ON CONFLICT (url) DO UPDATE
-                SET run_id      = EXCLUDED.run_id,
-                    domain      = EXCLUDED.domain,
-                    ok          = EXCLUDED.ok,
-                    status_code = EXCLUDED.status_code,
-                    crawled_at  = NOW()
+                SET run_id         = EXCLUDED.run_id,
+                    domain         = EXCLUDED.domain,
+                    ok             = EXCLUDED.ok,
+                    status_code    = EXCLUDED.status_code,
+                    blocked_reason = EXCLUDED.blocked_reason,
+                    crawled_at     = NOW()
             """,
-            (run_id, domain, url, ok, status_code),
+            (run_id, domain, url, ok, status_code, blocked_reason),
         )
 
 

@@ -78,6 +78,18 @@ def _extract_links(soup: BeautifulSoup, page_url: str) -> list[str]:
     return links
 
 
+# Cloudflare signals on a 403: bot mitigation vs. an Access-gated domain.
+_CF_BLOCK_HEADERS = ("cf-mitigated", "cf-access-domain")
+
+
+def _cf_block_reason(response) -> str | None:
+    """If a 403 response carries a Cloudflare block header, return which one(s)."""
+    if response is None or response.status_code != 403:
+        return None
+    reasons = [h for h in _CF_BLOCK_HEADERS if h in response.headers]
+    return ", ".join(reasons) if reasons else None
+
+
 @app.task
 def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
     """Crawl a seed URL and every same-domain link reachable from it (BFS),
@@ -106,9 +118,16 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
             status = response.status_code
             response.raise_for_status()
         except Exception as exc:
-            status = getattr(getattr(exc, "response", None), "status_code", None)
-            logger.warning(f"Failed to fetch {url}: {exc}")
-            record_page(run_id, base, url, ok=False, status_code=status)
+            resp = getattr(exc, "response", None)
+            status = getattr(resp, "status_code", None)
+            blocked = _cf_block_reason(resp)
+            if blocked:
+                logger.warning(f"Cloudflare-blocked ({blocked}) {url}")
+            else:
+                logger.warning(f"Failed to fetch {url}: {exc}")
+            record_page(
+                run_id, base, url, ok=False, status_code=status, blocked_reason=blocked
+            )
             continue
 
         if "html" not in response.headers.get("Content-Type", "").lower():

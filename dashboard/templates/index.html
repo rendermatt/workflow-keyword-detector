@@ -271,6 +271,16 @@
     table.pages a:hover { color: var(--accent2); text-decoration: underline; }
     .status-ok { color: var(--accent2); }
     .status-err { color: #ff6384; }
+    .cf-badge {
+      display: inline-block;
+      background: rgba(255,99,132,.14);
+      border: 1px solid rgba(255,99,132,.4);
+      color: #ff8fa3;
+      border-radius: 6px;
+      padding: 1px 8px;
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
@@ -591,8 +601,12 @@ async function openDomainModal(domain) {
   });
 
   const totalHits = pages.reduce((s, p) => s + Number(p.hits || 0), 0);
+  const nHosts = Object.keys(groups).length;
+  const nBlocked = pages.filter(p => p.blocked_reason).length;
   document.getElementById('dm-sub').textContent =
-    `${pages.length} page${pages.length === 1 ? '' : 's'} across ${Object.keys(groups).length} host${Object.keys(groups).length === 1 ? '' : 's'} · ${totalHits} total hits`;
+    `${pages.length} page${pages.length === 1 ? '' : 's'} across ${nHosts} host${nHosts === 1 ? '' : 's'}`
+    + ` · ${totalHits} total hits`
+    + (nBlocked ? ` · ${nBlocked} Cloudflare-blocked` : '');
 
   body.innerHTML = '';
   Object.keys(groups).sort().forEach(host => {
@@ -601,9 +615,14 @@ async function openDomainModal(domain) {
     const rows = groups[host].map(p => {
       let path = p.url;
       try { const u = new URL(p.url); path = (u.pathname || '/') + u.search; } catch {}
-      const status = p.ok
-        ? `<span class="status-ok">${p.status_code || 'ok'}</span>`
-        : `<span class="status-err">${p.status_code || 'error'}</span>`;
+      let status;
+      if (p.blocked_reason) {
+        status = `<span class="cf-badge" title="Cloudflare 403: ${esc(p.blocked_reason)}">403 · Cloudflare (${esc(p.blocked_reason)})</span>`;
+      } else if (p.ok) {
+        status = `<span class="status-ok">${p.status_code || 'ok'}</span>`;
+      } else {
+        status = `<span class="status-err">${p.status_code || 'error'}</span>`;
+      }
       return `<tr>
         <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(path)}</a></td>
         <td class="num">${p.hits}</td>

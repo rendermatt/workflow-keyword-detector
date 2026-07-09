@@ -59,19 +59,21 @@ def init_features_schema() -> None:
             # ensured here so the dashboard works before the first crawl runs.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS crawled_pages (
-                    id          SERIAL      PRIMARY KEY,
-                    run_id      TEXT        NOT NULL,
-                    domain      TEXT        NOT NULL,
-                    url         TEXT        NOT NULL UNIQUE,
-                    ok          BOOLEAN     NOT NULL DEFAULT TRUE,
-                    status_code INTEGER,
-                    crawled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    id             SERIAL      PRIMARY KEY,
+                    run_id         TEXT        NOT NULL,
+                    domain         TEXT        NOT NULL,
+                    url            TEXT        NOT NULL UNIQUE,
+                    ok             BOOLEAN     NOT NULL DEFAULT TRUE,
+                    status_code    INTEGER,
+                    blocked_reason TEXT,
+                    crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
             cur.execute("""
                 CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain
                 ON crawled_pages (domain)
             """)
+            cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
 
             # Seed a starter feature only if none exist yet.
             cur.execute("SELECT COUNT(*) AS n FROM features")
@@ -227,12 +229,13 @@ def api_domain_pages(domain):
                 SELECT cp.url,
                        cp.ok,
                        cp.status_code,
+                       cp.blocked_reason,
                        cp.crawled_at,
                        COALESCE(SUM(sr.count), 0) AS hits
                 FROM crawled_pages cp
                 LEFT JOIN scrape_results sr ON sr.url = cp.url
                 WHERE cp.domain = %s
-                GROUP BY cp.url, cp.ok, cp.status_code, cp.crawled_at
+                GROUP BY cp.url, cp.ok, cp.status_code, cp.blocked_reason, cp.crawled_at
                 ORDER BY cp.url
             """, (domain,))
             rows = cur.fetchall()
