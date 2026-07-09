@@ -16,6 +16,11 @@ projects:
         fromDatabase:
           name: Workflowsdb
           property: connectionString
+      # Needed for the dashboard to trigger crawls on the workflow service.
+      - key: RENDER_API_KEY
+        sync: false
+      - key: WORKFLOW_SLUG
+        sync: false
       region: oregon
       buildCommand: pip install -r requirements.txt
       startCommand: gunicorn app:app

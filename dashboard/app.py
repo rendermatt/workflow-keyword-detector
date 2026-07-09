@@ -1,4 +1,5 @@
 import os
+import threading
 from flask import Flask, jsonify, render_template, request
 import psycopg2
 import psycopg2.extras
@@ -61,19 +62,28 @@ def init_features_schema() -> None:
                 CREATE TABLE IF NOT EXISTS crawled_pages (
                     id             SERIAL      PRIMARY KEY,
                     run_id         TEXT        NOT NULL,
+                    feature_id     INTEGER     NOT NULL,
                     domain         TEXT        NOT NULL,
-                    url            TEXT        NOT NULL UNIQUE,
+                    url            TEXT        NOT NULL,
                     ok             BOOLEAN     NOT NULL DEFAULT TRUE,
                     status_code    INTEGER,
                     blocked_reason TEXT,
-                    crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
                 )
             """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain
-                ON crawled_pages (domain)
-            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
+            # Migrate older crawled_pages tables in place.
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
+            cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
+            cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
+            cur.execute("SELECT 1 FROM pg_constraint WHERE conname = 'crawled_pages_feature_url_key'")
+            if not cur.fetchone():
+                cur.execute(
+                    "ALTER TABLE crawled_pages "
+                    "ADD CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)"
+                )
 
             # Seed a starter feature only if none exist yet.
             cur.execute("SELECT COUNT(*) AS n FROM features")
@@ -121,22 +131,30 @@ def docs_page():
     return render_template("docs.html", pages=pages)
 
 
-def _feature_filter():
-    """Read an optional ?feature_id from the request and return a
-    (sql_condition, params) pair that constrains scrape_results rows to keywords
-    belonging to that feature. With no feature selected it is a no-op ("TRUE").
+def _selected_feature_id():
+    """The feature the dashboard is scoped to: the requested ?feature_id, or the
+    first feature as a default. None only if no features exist yet."""
+    feature_id = request.args.get("feature_id", type=int)
+    if feature_id:
+        return feature_id
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id FROM features ORDER BY id LIMIT 1")
+            row = cur.fetchone()
+            return row["id"] if row else None
 
-    Designed to be dropped into a WHERE clause, e.g.
+
+def _feature_filter():
+    """A (sql_condition, params) pair scoping single-table (scrape_results or
+    crawled_pages) queries to the selected feature via its feature_id column.
+    Both tables now store feature_id, so re-use this in a WHERE clause:
         f_cond, f_params = _feature_filter()
         cur.execute(f"... WHERE {f_cond} ...", f_params)
     """
-    feature_id = request.args.get("feature_id", type=int)
-    if feature_id:
-        return (
-            "keyword IN (SELECT keyword FROM feature_keywords WHERE feature_id = %s)",
-            [feature_id],
-        )
-    return ("TRUE", [])
+    fid = _selected_feature_id()
+    if fid is None:
+        return ("FALSE", [])
+    return ("feature_id = %s", [fid])
 
 
 @app.route("/api/summary")
@@ -148,13 +166,14 @@ def api_summary():
             total_hits = cur.fetchone()["sum"] or 0
             cur.execute(f"SELECT MAX(scraped_at) AS last_run FROM scrape_results WHERE {f_cond}", f_params)
             last_run = cur.fetchone()["last_run"]
-            # Crawl coverage is feature-independent (we crawl whole sites).
-            # Pages skipped by robots.txt weren't fetched, so exclude them.
-            cur.execute("SELECT COUNT(DISTINCT domain) AS n FROM crawled_pages")
+            # Coverage for the selected feature. Pages skipped by robots.txt
+            # weren't fetched, so exclude them from the crawled count.
+            cur.execute(f"SELECT COUNT(DISTINCT domain) AS n FROM crawled_pages WHERE {f_cond}", f_params)
             total_domains = cur.fetchone()["n"]
             cur.execute(
-                "SELECT COUNT(*) AS n FROM crawled_pages "
-                "WHERE blocked_reason IS DISTINCT FROM 'robots-disallowed'"
+                f"SELECT COUNT(*) AS n FROM crawled_pages "
+                f"WHERE {f_cond} AND blocked_reason IS DISTINCT FROM 'robots-disallowed'",
+                f_params,
             )
             pages_crawled = cur.fetchone()["n"]
     return jsonify(
@@ -202,8 +221,11 @@ def api_urls():
 
 @app.route("/api/domains")
 def api_domains():
-    """Crawl coverage per domain: how many pages were crawled, plus total
-    keyword hits and when it was last crawled. Coverage spans all features."""
+    """Crawl coverage per domain for the selected feature: pages crawled, total
+    keyword hits, and when it was last crawled."""
+    fid = _selected_feature_id()
+    if fid is None:
+        return jsonify([])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -218,10 +240,12 @@ def api_domains():
                        MAX(cp.crawled_at)                            AS last_crawled,
                        COALESCE(SUM(sr.count), 0)                    AS total_hits
                 FROM crawled_pages cp
-                LEFT JOIN scrape_results sr ON sr.url = cp.url
+                LEFT JOIN scrape_results sr
+                       ON sr.url = cp.url AND sr.feature_id = cp.feature_id
+                WHERE cp.feature_id = %s
                 GROUP BY cp.domain
                 ORDER BY pages_crawled DESC, cp.domain
-            """)
+            """, (fid,))
             rows = cur.fetchall()
     return jsonify([
         {**dict(r), "last_crawled": r["last_crawled"].isoformat() if r["last_crawled"] else None}
@@ -231,7 +255,11 @@ def api_domains():
 
 @app.route("/api/domains/<path:domain>/pages")
 def api_domain_pages(domain):
-    """Every page crawled for a domain, with its hit total and fetch status."""
+    """Every page crawled for a domain (for the selected feature), with its hit
+    total and fetch status."""
+    fid = _selected_feature_id()
+    if fid is None:
+        return jsonify([])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -242,16 +270,71 @@ def api_domain_pages(domain):
                        cp.crawled_at,
                        COALESCE(SUM(sr.count), 0) AS hits
                 FROM crawled_pages cp
-                LEFT JOIN scrape_results sr ON sr.url = cp.url
-                WHERE cp.domain = %s
+                LEFT JOIN scrape_results sr
+                       ON sr.url = cp.url AND sr.feature_id = cp.feature_id
+                WHERE cp.feature_id = %s AND cp.domain = %s
                 GROUP BY cp.url, cp.ok, cp.status_code, cp.blocked_reason, cp.crawled_at
                 ORDER BY cp.url
-            """, (domain,))
+            """, (fid, domain))
             rows = cur.fetchall()
     return jsonify([
         {**dict(r), "crawled_at": r["crawled_at"].isoformat() if r["crawled_at"] else None}
         for r in rows
     ])
+
+
+@app.route("/api/crawl", methods=["POST"])
+def api_crawl():
+    """Kick off a crawl for a feature over a provided list of domains by
+    triggering the workflow's run_crawl task."""
+    data = request.get_json(silent=True) or {}
+    try:
+        feature_id = int(data.get("feature_id"))
+    except (TypeError, ValueError):
+        return jsonify(error="Select a feature to crawl for."), 400
+    domains = [
+        d.strip() for d in (data.get("domains") or [])
+        if isinstance(d, str) and d.strip()
+    ]
+    if not domains:
+        return jsonify(error="Provide at least one domain (upload a CSV)."), 400
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT name FROM features WHERE id = %s", (feature_id,))
+            feature = cur.fetchone()
+            if not feature:
+                return jsonify(error="Feature not found."), 404
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM feature_keywords WHERE feature_id = %s",
+                (feature_id,),
+            )
+            if cur.fetchone()["n"] == 0:
+                return jsonify(error="This feature has no keywords to search for."), 400
+
+    slug = os.environ.get("WORKFLOW_SLUG")
+    if not slug or not os.environ.get("RENDER_API_KEY"):
+        return jsonify(
+            error="Crawl triggering isn't configured — set RENDER_API_KEY and "
+                  "WORKFLOW_SLUG on the dashboard service."
+        ), 503
+    try:
+        from render_sdk import Render
+    except Exception:
+        return jsonify(error="render_sdk is not installed on the dashboard service."), 503
+
+    task_slug = f"{slug}/run_crawl"
+
+    def _trigger():
+        try:
+            Render().workflows.run_task(task_slug, [feature_id, domains])
+        except Exception:
+            app.logger.exception("Failed to trigger crawl for feature %s", feature_id)
+
+    # Fire-and-forget: the crawl runs on the workflow service and streams its
+    # results into the DB; the dashboard will reflect them on refresh.
+    threading.Thread(target=_trigger, daemon=True).start()
+    return jsonify(status="started", feature=feature["name"], domains=len(domains)), 202
 
 
 @app.route("/api/heatmap")

@@ -66,6 +66,52 @@
       cursor: pointer;
     }
     .feature-select select:focus { outline: none; border-color: var(--accent); }
+    .new-crawl-btn {
+      font-family: inherit; font-size: 13px; cursor: pointer;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; padding: 7px 14px;
+    }
+    .new-crawl-btn:hover { background: #5a52e0; }
+
+    /* Crawl modal form */
+    .crawl-field { margin-bottom: 18px; }
+    .crawl-field label {
+      display: block; font-size: 12px; color: var(--muted);
+      margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    .crawl-field select {
+      width: 100%; background: var(--bg); color: var(--text);
+      border: 1px solid var(--border); border-radius: 8px;
+      font-family: inherit; font-size: 14px; padding: 9px 12px;
+    }
+    .crawl-field select:focus { outline: none; border-color: var(--accent); }
+    .crawl-field .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
+    .crawl-field .hint code {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 4px; padding: 0 4px; font-size: 11px;
+    }
+    .file-drop {
+      display: flex; align-items: center; gap: 12px;
+      border: 1px dashed var(--border); border-radius: 8px;
+      padding: 14px; background: var(--bg);
+    }
+    .file-btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 7px 14px;
+      cursor: pointer; font-size: 13px; white-space: nowrap;
+    }
+    .file-btn:hover { border-color: var(--accent); }
+    .file-info { font-size: 13px; color: var(--muted); }
+    .crawl-status { font-size: 13px; margin-top: 4px; min-height: 1em; }
+    .crawl-status.ok { color: var(--accent2); }
+    .crawl-status.err { color: #ff6384; }
+    .domain-preview {
+      margin-top: 10px; max-height: 140px; overflow-y: auto;
+      font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace;
+      display: none;
+    }
+    .domain-preview.show { display: block; }
 
     .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
 
@@ -310,9 +356,8 @@
   </nav>
   <div class="feature-select">
     <label for="feature-filter">Feature</label>
-    <select id="feature-filter">
-      <option value="">All features</option>
-    </select>
+    <select id="feature-filter"></select>
+    <button class="new-crawl-btn" onclick="openCrawlModal()">+ New Crawl</button>
   </div>
 </header>
 
@@ -366,6 +411,41 @@
   </div>
 </div>
 
+<!-- New crawl modal -->
+<div class="modal-backdrop" id="crawl-modal">
+  <div class="modal" style="max-width:560px">
+    <div class="modal-head">
+      <h2>New Crawl</h2>
+      <button class="modal-close" onclick="closeCrawlModal()">Close</button>
+    </div>
+    <div class="modal-sub">Pick a feature and upload a CSV of domains to crawl. The crawl uses the feature's configured keywords.</div>
+
+    <div class="crawl-field">
+      <label for="crawl-feature">Feature</label>
+      <select id="crawl-feature"></select>
+    </div>
+
+    <div class="crawl-field">
+      <label>Domains CSV</label>
+      <div class="file-drop">
+        <label class="file-btn">
+          Choose CSV
+          <input type="file" id="crawl-csv" accept=".csv,text/csv" hidden />
+        </label>
+        <span class="file-info" id="crawl-file-info">No file selected</span>
+      </div>
+      <div class="hint">A <code>url</code> or <code>domain</code> column, else the first column. One domain per row (e.g. <code>example.com</code>).</div>
+      <div class="domain-preview" id="crawl-preview"></div>
+    </div>
+
+    <div class="crawl-status" id="crawl-status"></div>
+    <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
+      <button class="modal-close" onclick="closeCrawlModal()">Cancel</button>
+      <button class="new-crawl-btn" id="crawl-start" onclick="startCrawl()">Start Crawl</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const PALETTE = [
   '#6c63ff','#00d4aa','#ff6384','#ffcd56','#36a2eb','#ff9f40',
@@ -381,7 +461,7 @@ function hsl(value, max) {
   return `hsl(${h}, ${s}%, ${l}%)`;
 }
 
-// Selected feature filter, appended to every API request.
+// The dashboard is always scoped to one feature (the selected one).
 function featureQuery() {
   const id = document.getElementById('feature-filter').value;
   return id ? `?feature_id=${encodeURIComponent(id)}` : '';
@@ -394,20 +474,28 @@ function drawChart(key, canvasId, config) {
   charts[key] = new Chart(document.getElementById(canvasId), config);
 }
 
-// Populate the feature dropdown once on startup.
+let allFeatures = [];
+
+// Populate the feature selectors (header + crawl modal). No "all" option —
+// the dashboard shows exactly one feature at a time.
 async function loadFeatureOptions() {
-  try {
-    const features = await fetch('/api/features').then(r => r.json());
-    const sel = document.getElementById('feature-filter');
-    features.forEach(f => {
-      const opt = document.createElement('option');
-      opt.value = f.id;
-      opt.textContent = f.name;
-      sel.appendChild(opt);
-    });
-  } catch (err) {
-    console.error('Failed to load feature options:', err);
+  allFeatures = await fetch('/api/features').then(r => r.json());
+  const header = document.getElementById('feature-filter');
+  const crawlSel = document.getElementById('crawl-feature');
+  header.innerHTML = '';
+  crawlSel.innerHTML = '';
+  if (!allFeatures.length) {
+    header.innerHTML = '<option value="">No features</option>';
+    crawlSel.innerHTML = '<option value="">No features — add one first</option>';
+    return;
   }
+  allFeatures.forEach(f => {
+    const o1 = document.createElement('option');
+    o1.value = f.id; o1.textContent = f.name;
+    header.appendChild(o1);
+    const o2 = o1.cloneNode(true);
+    crawlSel.appendChild(o2);
+  });
 }
 
 async function load() {
@@ -546,12 +634,12 @@ function esc(s) {
 
 function fmtDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
 
-// Crawl coverage table (feature-independent, so loaded once).
+// Crawl coverage table for the selected feature.
 async function loadCoverage() {
-  const domains = await fetch('/api/domains').then(r => r.json());
+  const domains = await fetch('/api/domains' + featureQuery()).then(r => r.json());
   const container = document.getElementById('coverage-container');
   if (!domains.length) {
-    container.innerHTML = '<div class="loading">No pages crawled yet — run the workflow to populate coverage.</div>';
+    container.innerHTML = '<div class="loading">No pages crawled yet for this feature — start a crawl to populate coverage.</div>';
     return;
   }
   const maxPages = Math.max(...domains.map(d => d.pages_crawled));
@@ -589,7 +677,7 @@ async function loadCoverage() {
   container.appendChild(table);
   const caption = document.createElement('div');
   caption.className = 'cov-caption';
-  caption.textContent = 'Coverage counts every page crawled (all features). Click a domain to see its pages.';
+  caption.textContent = 'Coverage counts pages crawled for the selected feature. Click a domain to see its pages.';
   container.appendChild(caption);
 }
 
@@ -600,7 +688,8 @@ async function openDomainModal(domain) {
   document.getElementById('dm-body').innerHTML = '<div class="loading">Loading…</div>';
   document.getElementById('domain-modal').classList.add('open');
 
-  const pages = await fetch(`/api/domains/${encodeURIComponent(domain)}/pages`).then(r => r.json());
+  const fq = featureQuery();
+  const pages = await fetch(`/api/domains/${encodeURIComponent(domain)}/pages${fq}`).then(r => r.json());
   const body = document.getElementById('dm-body');
   if (!pages.length) {
     body.innerHTML = '<div class="loading">No pages recorded for this domain.</div>';
@@ -665,16 +754,140 @@ function closeDomainModal() {
 document.getElementById('domain-modal').addEventListener('click', e => {
   if (e.target.id === 'domain-modal') closeDomainModal();
 });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDomainModal(); });
 
-document.getElementById('feature-filter').addEventListener('change', () => {
-  load().catch(err => console.error('Dashboard reload error:', err));
+// ---- New crawl modal ----
+let crawlDomains = [];
+
+function setCrawlStatus(msg, kind) {
+  const el = document.getElementById('crawl-status');
+  el.textContent = msg || '';
+  el.className = 'crawl-status' + (kind ? ' ' + kind : '');
+}
+
+function openCrawlModal() {
+  if (!allFeatures.length) return;
+  crawlDomains = [];
+  document.getElementById('crawl-csv').value = '';
+  document.getElementById('crawl-file-info').textContent = 'No file selected';
+  document.getElementById('crawl-preview').classList.remove('show');
+  document.getElementById('crawl-preview').innerHTML = '';
+  setCrawlStatus('');
+  document.getElementById('crawl-start').disabled = false;
+  // Default the crawl feature to whatever the dashboard is showing.
+  document.getElementById('crawl-feature').value = document.getElementById('feature-filter').value;
+  document.getElementById('crawl-modal').classList.add('open');
+}
+function closeCrawlModal() {
+  document.getElementById('crawl-modal').classList.remove('open');
+}
+document.getElementById('crawl-modal').addEventListener('click', e => {
+  if (e.target.id === 'crawl-modal') closeCrawlModal();
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeDomainModal(); closeCrawlModal(); }
 });
 
+function parseCsvLine(line) {
+  const out = []; let cur = '', q = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (q) {
+      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { out.push(cur); cur = ''; }
+    else cur += c;
+  }
+  out.push(cur);
+  return out.map(f => f.trim());
+}
+
+// Extract domains: use a url/domain column if the header has one, else col 0.
+function parseDomainsCsv(text) {
+  const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
+  if (!lines.length) return [];
+  const header = parseCsvLine(lines[0]).map(h => h.toLowerCase());
+  let col = header.indexOf('url');
+  if (col === -1) col = header.indexOf('domain');
+  const hasHeader = col !== -1;
+  if (!hasHeader) col = 0;
+  const rows = hasHeader ? lines.slice(1) : lines;
+  const seen = new Set(), out = [];
+  rows.forEach(line => {
+    const v = (parseCsvLine(line)[col] || '').trim();
+    const key = v.toLowerCase();
+    if (v && !seen.has(key)) { seen.add(key); out.push(v); }
+  });
+  return out;
+}
+
+document.getElementById('crawl-csv').addEventListener('change', ev => {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      crawlDomains = parseDomainsCsv(String(reader.result));
+      const preview = document.getElementById('crawl-preview');
+      document.getElementById('crawl-file-info').textContent =
+        `${file.name} — ${crawlDomains.length} domain${crawlDomains.length === 1 ? '' : 's'}`;
+      if (crawlDomains.length) {
+        preview.innerHTML = crawlDomains.map(d => esc(d)).join('<br>');
+        preview.classList.add('show');
+        setCrawlStatus('');
+      } else {
+        preview.classList.remove('show');
+        setCrawlStatus('No domains found in that file.', 'err');
+      }
+    } catch (err) {
+      console.error(err);
+      setCrawlStatus('Could not read that file.', 'err');
+    }
+  };
+  reader.readAsText(file);
+});
+
+async function startCrawl() {
+  const featureId = document.getElementById('crawl-feature').value;
+  if (!featureId) { setCrawlStatus('Select a feature.', 'err'); return; }
+  if (!crawlDomains.length) { setCrawlStatus('Upload a CSV of domains first.', 'err'); return; }
+
+  const btn = document.getElementById('crawl-start');
+  btn.disabled = true;
+  setCrawlStatus('Starting crawl…');
+  try {
+    const res = await fetch('/api/crawl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feature_id: Number(featureId), domains: crawlDomains }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setCrawlStatus(data.error || 'Failed to start crawl.', 'err');
+      btn.disabled = false;
+      return;
+    }
+    setCrawlStatus(
+      `Crawl started for “${data.feature}” over ${data.domains} domain${data.domains === 1 ? '' : 's'}. `
+      + `Results will appear here as pages are crawled — refresh in a bit.`, 'ok');
+  } catch (err) {
+    console.error(err);
+    setCrawlStatus('Failed to start crawl.', 'err');
+    btn.disabled = false;
+  }
+}
+
+// Reload everything for the currently selected feature.
+function reloadAll() {
+  load().catch(err => console.error('Dashboard reload error:', err));
+  loadCoverage().catch(err => console.error('Coverage load error:', err));
+}
+
+document.getElementById('feature-filter').addEventListener('change', reloadAll);
+
 loadFeatureOptions()
-  .then(() => load())
+  .then(reloadAll)
   .catch(err => console.error('Dashboard load error:', err));
-loadCoverage().catch(err => console.error('Coverage load error:', err));
 </script>
 </body>
 </html>

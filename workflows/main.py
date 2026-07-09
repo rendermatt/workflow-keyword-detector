@@ -1,10 +1,8 @@
 import asyncio
-import csv
 import logging
 import os
 import uuid
 from collections import deque
-from pathlib import Path
 from urllib.parse import urldefrag, urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
@@ -12,7 +10,7 @@ import requests
 from bs4 import BeautifulSoup
 from render_sdk import Retry, Workflows
 
-from db import init_db, record_page, save_result
+from db import get_feature_keywords, init_db, record_page, save_result
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -125,10 +123,12 @@ def _robots_allows(session: requests.Session, url: str, cache: dict) -> bool:
 
 
 @app.task
-def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
+def crawl_domain(
+    seed_url: str, keywords: list[str], run_id: str, feature_id: int
+) -> dict:
     """Crawl a seed URL and every same-domain link reachable from it (BFS),
-    counting keyword occurrences on each page and recording crawl coverage.
-    Bounded by CRAWL_MAX_PAGES."""
+    counting keyword occurrences on each page and recording crawl coverage for
+    the given feature. Bounded by CRAWL_MAX_PAGES."""
     seed = _ensure_scheme(seed_url.strip())
     base = _base_domain(urlparse(seed).netloc)
     logger.info(f"Crawling {base} from {seed} (max {CRAWL_MAX_PAGES} pages)")
@@ -149,7 +149,7 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
         if not _robots_allows(session, url, robots_cache):
             logger.info(f"robots.txt disallows {url}")
             record_page(
-                run_id, base, url, ok=False,
+                run_id, feature_id, base, url, ok=False,
                 status_code=None, blocked_reason=ROBOTS_DISALLOWED,
             )
             pages_skipped_robots += 1
@@ -170,12 +170,13 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
             else:
                 logger.warning(f"Failed to fetch {url}: {exc}")
             record_page(
-                run_id, base, url, ok=False, status_code=status, blocked_reason=blocked
+                run_id, feature_id, base, url, ok=False,
+                status_code=status, blocked_reason=blocked,
             )
             continue
 
         if "html" not in response.headers.get("Content-Type", "").lower():
-            record_page(run_id, base, url, ok=True, status_code=status)
+            record_page(run_id, feature_id, base, url, ok=True, status_code=status)
             pages_ok += 1
             continue
 
@@ -185,8 +186,8 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
         text = soup.get_text(separator=" ").lower()
 
         keyword_counts = {kw: text.count(kw.lower()) for kw in keywords}
-        save_result(run_id=run_id, url=url, keyword_counts=keyword_counts)
-        record_page(run_id, base, url, ok=True, status_code=status)
+        save_result(run_id, feature_id, url, keyword_counts)
+        record_page(run_id, feature_id, base, url, ok=True, status_code=status)
         pages_ok += 1
 
         for link in _extract_links(soup, url):
@@ -211,45 +212,34 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
     }
 
 
-def _read_csv_column(filename: str, column: str) -> list[str]:
-    """Read a single column from a CSV file in the workflows root directory."""
-    path = Path(__file__).parent / filename
-    with path.open() as f:
-        return [
-            row.get(column, "").strip() or next(iter(row.values()), "").strip()
-            for row in csv.DictReader(f)
-            if any(row.values())
-        ]
-
-
 @app.task
-async def process_csvs() -> dict:
-    """
-    Entry-point task. Reads keyword and URL CSVs from filenames set in
-    KEYWORDS_CSV and URLS_CSV environment variables (resolved relative to
-    the workflows root directory), then fans out a crawl_domain task per seed
-    URL. Each task crawls that seed's whole domain (same-domain links).
-    """
-    keywords_file = os.environ["KEYWORDS_CSV"]
-    urls_file = os.environ["URLS_CSV"]
-
+async def run_crawl(feature_id: int, domains: list[str]) -> dict:
+    """Entry-point task. Crawls each provided seed domain for one feature, using
+    the feature's keywords from the database. Fans out a crawl_domain task per
+    seed; each crawls that seed's whole domain (following same-domain links)."""
     run_id = str(uuid.uuid4())
-    logger.info(f"Starting run {run_id} (keywords={keywords_file}, urls={urls_file})")
+    init_db()
 
-    if not os.environ.get("LOCAL_OUTPUT_CSV"):
-        init_db()
+    keywords = get_feature_keywords(feature_id)
+    seeds = [d.strip() for d in domains if d and d.strip()]
 
-    keywords = _read_csv_column(keywords_file, "keyword")
-    seeds = _read_csv_column(urls_file, "url")
+    logger.info(
+        f"Starting run {run_id} for feature {feature_id}: "
+        f"{len(keywords)} keywords, {len(seeds)} seed domains"
+    )
 
-    logger.info(f"{len(keywords)} keywords, {len(seeds)} seed URLs")
+    if not keywords:
+        raise ValueError(f"Feature {feature_id} has no keywords configured")
+    if not seeds:
+        raise ValueError("No domains provided to crawl")
 
     results = await asyncio.gather(
-        *[crawl_domain(seed, keywords, run_id) for seed in seeds]
+        *[crawl_domain(seed, keywords, run_id, feature_id) for seed in seeds]
     )
 
     return {
         "run_id": run_id,
+        "feature_id": feature_id,
         "seeds": len(seeds),
         "pages_crawled": sum(r["pages_crawled"] for r in results),
         "keywords_tracked": len(keywords),

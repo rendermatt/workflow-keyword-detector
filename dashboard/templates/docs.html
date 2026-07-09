@@ -173,11 +173,11 @@
   <div class="panel">
     <h3>How the crawl works</h3>
     <ol class="steps">
-      <li>The workflow reads a list of seed domains from its <code>domains.csv</code> file. A bare domain like <code>example.com</code> is treated as <code>https://example.com</code>.</li>
-      <li>Starting from each seed, the crawler fetches the page and <strong>follows links to other pages on the same domain</strong> — breadth-first — to reach documentation, blog posts, job postings, and the like. (15-second request timeout, bot <code>User-Agent</code>.)</li>
+      <li>You start a crawl from the dashboard's <strong>New Crawl</strong> button: pick a feature and upload a CSV of seed domains. A bare domain like <code>example.com</code> is treated as <code>https://example.com</code>.</li>
+      <li>The workflow loads that <strong>feature's keywords from the database</strong> and, starting from each seed, fetches the page and <strong>follows links to other pages on the same domain</strong> — breadth-first — to reach documentation, blog posts, job postings, and the like. (15-second request timeout, bot <code>User-Agent</code>.)</li>
       <li>"Same domain" means the same <strong>registrable domain, including subdomains</strong>: from <code>example.com</code> it will crawl <code>docs.example.com</code>, <code>example.com/careers</code>, and so on. Off-domain links are ignored.</li>
-      <li>On each page, <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> tags are stripped and the visible text is lowercased. For every keyword tied to a feature, it counts <strong>case-insensitive substring matches</strong>.</li>
-      <li>Keyword counts are <strong>upserted</strong> per (feature, URL, keyword) and every fetched page is recorded, so re-running refreshes the numbers instead of double-counting.</li>
+      <li>On each page, <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> tags are stripped and the visible text is lowercased. For every keyword in the selected feature, it counts <strong>case-insensitive substring matches</strong>.</li>
+      <li>Keyword counts are <strong>upserted</strong> per (feature, URL, keyword) and every fetched page is recorded, so re-crawling a feature refreshes the numbers instead of double-counting.</li>
     </ol>
     <div class="callout">
       <strong>Bounded &amp; polite.</strong> Each domain crawl stops after <code>CRAWL_MAX_PAGES</code> pages (default 50) and <strong>honors each host's <code>robots.txt</code></strong> — disallowed URLs are skipped and logged on the domain's detail view. The crawler does not execute JavaScript, so content rendered only client-side won't be seen.
@@ -190,8 +190,8 @@
       <span class="badge">{{ pages|length }} page{{ '' if pages|length == 1 else 's' }}</span>
     </div>
     <p class="muted" style="margin-bottom:16px">
-      These are the URLs that appear in the scraped data so far. The list is populated by the workflow;
-      to add or remove pages, edit <code>domains.csv</code> in the workflow service and re-run it.
+      These are the URLs that appear in the crawled data so far, across all features. To crawl more
+      pages, use <strong>New Crawl</strong> on the dashboard to run a feature over a list of domains.
     </p>
     {% if pages %}
     <div class="table-scroll">

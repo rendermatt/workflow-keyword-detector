@@ -4,7 +4,7 @@
 CREATE TABLE IF NOT EXISTS scrape_results (
     id         SERIAL      PRIMARY KEY,
     run_id     TEXT        NOT NULL,          -- UUID of the run that last wrote this row
-    feature_id INTEGER,                       -- feature this keyword belongs to (NULL until the scraper is feature-aware)
+    feature_id INTEGER     NOT NULL,          -- feature this crawl was run for
     url        TEXT        NOT NULL,
     keyword    TEXT        NOT NULL,
     count      INTEGER     NOT NULL,
@@ -29,15 +29,18 @@ CREATE INDEX IF NOT EXISTS idx_scrape_results_keyword ON scrape_results (keyword
 CREATE TABLE IF NOT EXISTS crawled_pages (
     id             SERIAL      PRIMARY KEY,
     run_id         TEXT        NOT NULL,
+    feature_id     INTEGER     NOT NULL,          -- feature this crawl was run for
     domain         TEXT        NOT NULL,          -- registrable domain of the seed
-    url            TEXT        NOT NULL UNIQUE,   -- specific page URL crawled
+    url            TEXT        NOT NULL,          -- specific page URL crawled
     ok             BOOLEAN     NOT NULL DEFAULT TRUE,
     status_code    INTEGER,
-    blocked_reason TEXT,                          -- Cloudflare 403 signal: 'cf-mitigated' / 'cf-access-domain'
-    crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    blocked_reason TEXT,                          -- 'cf-mitigated' / 'cf-access-domain' / 'robots-disallowed'
+    crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
 );
 
-CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain);
+CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id);
+CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain  ON crawled_pages (domain);
 
 -- Handy views ----------------------------------------------------------------
 
