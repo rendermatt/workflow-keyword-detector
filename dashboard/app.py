@@ -149,9 +149,13 @@ def api_summary():
             cur.execute(f"SELECT MAX(scraped_at) AS last_run FROM scrape_results WHERE {f_cond}", f_params)
             last_run = cur.fetchone()["last_run"]
             # Crawl coverage is feature-independent (we crawl whole sites).
+            # Pages skipped by robots.txt weren't fetched, so exclude them.
             cur.execute("SELECT COUNT(DISTINCT domain) AS n FROM crawled_pages")
             total_domains = cur.fetchone()["n"]
-            cur.execute("SELECT COUNT(*) AS n FROM crawled_pages")
+            cur.execute(
+                "SELECT COUNT(*) AS n FROM crawled_pages "
+                "WHERE blocked_reason IS DISTINCT FROM 'robots-disallowed'"
+            )
             pages_crawled = cur.fetchone()["n"]
     return jsonify(
         total_domains=total_domains,
@@ -204,8 +208,13 @@ def api_domains():
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT cp.domain,
-                       COUNT(DISTINCT cp.url)                        AS pages_crawled,
+                       COUNT(DISTINCT cp.url) FILTER (
+                           WHERE cp.blocked_reason IS DISTINCT FROM 'robots-disallowed'
+                       )                                             AS pages_crawled,
                        COUNT(DISTINCT cp.url) FILTER (WHERE cp.ok)   AS pages_ok,
+                       COUNT(DISTINCT cp.url) FILTER (
+                           WHERE cp.blocked_reason = 'robots-disallowed'
+                       )                                             AS pages_robots,
                        MAX(cp.crawled_at)                            AS last_crawled,
                        COALESCE(SUM(sr.count), 0)                    AS total_hits
                 FROM crawled_pages cp

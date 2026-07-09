@@ -281,6 +281,17 @@
       font-size: 11.5px;
       white-space: nowrap;
     }
+    .robots-badge {
+      display: inline-block;
+      background: rgba(255,205,86,.14);
+      border: 1px solid rgba(255,205,86,.4);
+      color: #ffcd56;
+      border-radius: 6px;
+      padding: 1px 8px;
+      font-size: 11.5px;
+      white-space: nowrap;
+    }
+    .robots-note { color: #ffcd56; }
   </style>
 </head>
 <body>
@@ -558,11 +569,15 @@ async function loadCoverage() {
     tr.title = 'Click to see crawled pages';
     const pct = maxPages ? (d.pages_crawled / maxPages) * 100 : 0;
     const failed = d.pages_crawled - d.pages_ok;
+    const notes = [
+      failed ? `<span class="status-err">${failed} failed</span>` : '',
+      d.pages_robots ? `<span class="robots-note">${d.pages_robots} robots</span>` : '',
+    ].filter(Boolean).join(', ');
     tr.innerHTML = `
       <td><span class="cov-domain">${esc(d.domain)}</span></td>
       <td class="num">
         <div class="cov-bar-wrap" style="justify-content:flex-end">
-          <span>${d.pages_crawled}${failed ? ` <span class="status-err">(${failed} failed)</span>` : ''}</span>
+          <span>${d.pages_crawled}${notes ? ` (${notes})` : ''}</span>
           <span class="cov-bar" style="width:${Math.max(pct, 4)}px"></span>
         </div>
       </td>
@@ -602,11 +617,13 @@ async function openDomainModal(domain) {
 
   const totalHits = pages.reduce((s, p) => s + Number(p.hits || 0), 0);
   const nHosts = Object.keys(groups).length;
-  const nBlocked = pages.filter(p => p.blocked_reason).length;
+  const nRobots = pages.filter(p => p.blocked_reason === 'robots-disallowed').length;
+  const nCf = pages.filter(p => p.blocked_reason && p.blocked_reason !== 'robots-disallowed').length;
   document.getElementById('dm-sub').textContent =
     `${pages.length} page${pages.length === 1 ? '' : 's'} across ${nHosts} host${nHosts === 1 ? '' : 's'}`
     + ` · ${totalHits} total hits`
-    + (nBlocked ? ` · ${nBlocked} Cloudflare-blocked` : '');
+    + (nCf ? ` · ${nCf} Cloudflare-blocked` : '')
+    + (nRobots ? ` · ${nRobots} skipped by robots.txt` : '');
 
   body.innerHTML = '';
   Object.keys(groups).sort().forEach(host => {
@@ -616,7 +633,9 @@ async function openDomainModal(domain) {
       let path = p.url;
       try { const u = new URL(p.url); path = (u.pathname || '/') + u.search; } catch {}
       let status;
-      if (p.blocked_reason) {
+      if (p.blocked_reason === 'robots-disallowed') {
+        status = `<span class="robots-badge" title="Skipped — disallowed by robots.txt">Blocked by robots.txt</span>`;
+      } else if (p.blocked_reason) {
         status = `<span class="cf-badge" title="Cloudflare 403: ${esc(p.blocked_reason)}">403 · Cloudflare (${esc(p.blocked_reason)})</span>`;
       } else if (p.ok) {
         status = `<span class="status-ok">${p.status_code || 'ok'}</span>`;

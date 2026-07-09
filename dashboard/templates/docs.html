@@ -180,7 +180,7 @@
       <li>Keyword counts are <strong>upserted</strong> per (feature, URL, keyword) and every fetched page is recorded, so re-running refreshes the numbers instead of double-counting.</li>
     </ol>
     <div class="callout">
-      <strong>Bounded &amp; polite.</strong> Each domain crawl stops after <code>CRAWL_MAX_PAGES</code> pages (default 50). The crawler does not execute JavaScript, so content rendered only client-side won't be seen, and it does not currently consult <code>robots.txt</code>.
+      <strong>Bounded &amp; polite.</strong> Each domain crawl stops after <code>CRAWL_MAX_PAGES</code> pages (default 50) and <strong>honors each host's <code>robots.txt</code></strong> — disallowed URLs are skipped and logged on the domain's detail view. The crawler does not execute JavaScript, so content rendered only client-side won't be seen.
     </div>
   </div>
 

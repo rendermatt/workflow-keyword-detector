@@ -6,6 +6,7 @@ import uuid
 from collections import deque
 from pathlib import Path
 from urllib.parse import urldefrag, urljoin, urlparse
+from urllib.robotparser import RobotFileParser
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,6 +21,13 @@ logger.setLevel(logging.INFO)
 # Max pages to fetch per seed domain in one crawl (tune via env var).
 CRAWL_MAX_PAGES = int(os.environ.get("CRAWL_MAX_PAGES", "50"))
 REQUEST_TIMEOUT = int(os.environ.get("CRAWL_REQUEST_TIMEOUT", "15"))
+USER_AGENT = "Mozilla/5.0 (compatible; RenderKeywordBot/1.0)"
+# Product token matched against robots.txt User-agent groups (RobotFileParser
+# keys on the part before the first "/", so pass the bare token, not USER_AGENT).
+ROBOTS_AGENT = "RenderKeywordBot"
+
+# blocked_reason value recorded when robots.txt disallows a URL.
+ROBOTS_DISALLOWED = "robots-disallowed"
 
 # File extensions that aren't crawlable HTML pages.
 _SKIP_EXTENSIONS = (
@@ -90,6 +98,32 @@ def _cf_block_reason(response) -> str | None:
     return ", ".join(reasons) if reasons else None
 
 
+def _robots_allows(session: requests.Session, url: str, cache: dict) -> bool:
+    """Check the host's robots.txt (fetched once per host, cached) for this URL.
+
+    Missing or unreadable robots.txt is treated as allow-all.
+    """
+    parsed = urlparse(url)
+    host_key = parsed.netloc
+    parser = cache.get(host_key)
+    if parser is None:
+        parser = RobotFileParser()
+        robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+        try:
+            resp = session.get(robots_url, timeout=REQUEST_TIMEOUT)
+            if 200 <= resp.status_code < 300:
+                parser.parse(resp.text.splitlines())
+            else:
+                parser.parse([])  # no robots.txt -> nothing disallowed
+        except Exception:
+            parser.parse([])  # unreachable -> be permissive
+        cache[host_key] = parser
+    try:
+        return parser.can_fetch(ROBOTS_AGENT, url)
+    except Exception:
+        return True
+
+
 @app.task
 def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
     """Crawl a seed URL and every same-domain link reachable from it (BFS),
@@ -100,17 +134,27 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
     logger.info(f"Crawling {base} from {seed} (max {CRAWL_MAX_PAGES} pages)")
 
     session = requests.Session()
-    session.headers.update(
-        {"User-Agent": "Mozilla/5.0 (compatible; RenderKeywordBot/1.0)"}
-    )
+    session.headers.update({"User-Agent": USER_AGENT})
 
+    robots_cache: dict = {}
     enqueued = {seed}
     queue: deque[str] = deque([seed])
     pages_crawled = 0
     pages_ok = 0
+    pages_skipped_robots = 0
 
     while queue and pages_crawled < CRAWL_MAX_PAGES:
         url = queue.popleft()
+
+        if not _robots_allows(session, url, robots_cache):
+            logger.info(f"robots.txt disallows {url}")
+            record_page(
+                run_id, base, url, ok=False,
+                status_code=None, blocked_reason=ROBOTS_DISALLOWED,
+            )
+            pages_skipped_robots += 1
+            continue
+
         pages_crawled += 1
 
         try:
@@ -154,12 +198,16 @@ def crawl_domain(seed_url: str, keywords: list[str], run_id: str) -> dict:
                 enqueued.add(link)
                 queue.append(link)
 
-    logger.info(f"Crawled {pages_crawled} pages for {base} ({pages_ok} ok)")
+    logger.info(
+        f"Crawled {pages_crawled} pages for {base} "
+        f"({pages_ok} ok, {pages_skipped_robots} skipped by robots.txt)"
+    )
     return {
         "domain": base,
         "seed": seed,
         "pages_crawled": pages_crawled,
         "pages_ok": pages_ok,
+        "pages_skipped_robots": pages_skipped_robots,
     }
 
 
