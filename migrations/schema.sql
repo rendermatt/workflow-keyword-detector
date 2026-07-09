@@ -21,6 +21,23 @@ CREATE INDEX IF NOT EXISTS idx_scrape_results_run_id  ON scrape_results (run_id)
 CREATE INDEX IF NOT EXISTS idx_scrape_results_url     ON scrape_results (url);
 CREATE INDEX IF NOT EXISTS idx_scrape_results_keyword ON scrape_results (keyword);
 
+-- Crawl coverage --------------------------------------------------------------
+-- One row per page fetched while crawling a seed domain. The crawler starts at
+-- each seed URL and follows same-domain links (including subdomains), so this
+-- records every path/subdomain reached and whether the fetch succeeded.
+
+CREATE TABLE IF NOT EXISTS crawled_pages (
+    id          SERIAL      PRIMARY KEY,
+    run_id      TEXT        NOT NULL,
+    domain      TEXT        NOT NULL,          -- registrable domain of the seed
+    url         TEXT        NOT NULL UNIQUE,   -- specific page URL crawled
+    ok          BOOLEAN     NOT NULL DEFAULT TRUE,
+    status_code INTEGER,
+    crawled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain);
+
 -- Handy views ----------------------------------------------------------------
 
 -- Totals per keyword across all runs

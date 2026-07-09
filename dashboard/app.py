@@ -55,6 +55,24 @@ def init_features_schema() -> None:
                 ON feature_keywords (feature_id)
             """)
 
+            # Crawl-coverage table (also created by the workflow's db.init_db);
+            # ensured here so the dashboard works before the first crawl runs.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS crawled_pages (
+                    id          SERIAL      PRIMARY KEY,
+                    run_id      TEXT        NOT NULL,
+                    domain      TEXT        NOT NULL,
+                    url         TEXT        NOT NULL UNIQUE,
+                    ok          BOOLEAN     NOT NULL DEFAULT TRUE,
+                    status_code INTEGER,
+                    crawled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("""
+                CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain
+                ON crawled_pages (domain)
+            """)
+
             # Seed a starter feature only if none exist yet.
             cur.execute("SELECT COUNT(*) AS n FROM features")
             if cur.fetchone()["n"] == 0:
@@ -83,6 +101,24 @@ def features_page():
     return render_template("features.html")
 
 
+@app.route("/docs")
+def docs_page():
+    """Explain what the crawler fetches and list the pages currently in the data."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT url,
+                       COUNT(DISTINCT keyword) AS keywords_matched,
+                       SUM(count)              AS total_hits,
+                       MAX(scraped_at)         AS last_scraped
+                FROM scrape_results
+                GROUP BY url
+                ORDER BY url
+            """)
+            pages = [dict(r) for r in cur.fetchall()]
+    return render_template("docs.html", pages=pages)
+
+
 def _feature_filter():
     """Read an optional ?feature_id from the request and return a
     (sql_condition, params) pair that constrains scrape_results rows to keywords
@@ -106,17 +142,18 @@ def api_summary():
     f_cond, f_params = _feature_filter()
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"SELECT COUNT(DISTINCT url) FROM scrape_results WHERE {f_cond}", f_params)
-            total_urls = cur.fetchone()["count"]
-            cur.execute(f"SELECT COUNT(DISTINCT keyword) FROM scrape_results WHERE {f_cond}", f_params)
-            total_keywords = cur.fetchone()["count"]
             cur.execute(f"SELECT SUM(count) FROM scrape_results WHERE {f_cond}", f_params)
             total_hits = cur.fetchone()["sum"] or 0
             cur.execute(f"SELECT MAX(scraped_at) AS last_run FROM scrape_results WHERE {f_cond}", f_params)
             last_run = cur.fetchone()["last_run"]
+            # Crawl coverage is feature-independent (we crawl whole sites).
+            cur.execute("SELECT COUNT(DISTINCT domain) AS n FROM crawled_pages")
+            total_domains = cur.fetchone()["n"]
+            cur.execute("SELECT COUNT(*) AS n FROM crawled_pages")
+            pages_crawled = cur.fetchone()["n"]
     return jsonify(
-        total_urls=total_urls,
-        total_keywords=total_keywords,
+        total_domains=total_domains,
+        pages_crawled=pages_crawled,
         total_hits=total_hits,
         last_run_at=last_run.isoformat() if last_run else None,
     )
@@ -155,6 +192,54 @@ def api_urls():
             """, f_params)
             rows = cur.fetchall()
     return jsonify([dict(r) for r in rows])
+
+
+@app.route("/api/domains")
+def api_domains():
+    """Crawl coverage per domain: how many pages were crawled, plus total
+    keyword hits and when it was last crawled. Coverage spans all features."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT cp.domain,
+                       COUNT(DISTINCT cp.url)                        AS pages_crawled,
+                       COUNT(DISTINCT cp.url) FILTER (WHERE cp.ok)   AS pages_ok,
+                       MAX(cp.crawled_at)                            AS last_crawled,
+                       COALESCE(SUM(sr.count), 0)                    AS total_hits
+                FROM crawled_pages cp
+                LEFT JOIN scrape_results sr ON sr.url = cp.url
+                GROUP BY cp.domain
+                ORDER BY pages_crawled DESC, cp.domain
+            """)
+            rows = cur.fetchall()
+    return jsonify([
+        {**dict(r), "last_crawled": r["last_crawled"].isoformat() if r["last_crawled"] else None}
+        for r in rows
+    ])
+
+
+@app.route("/api/domains/<path:domain>/pages")
+def api_domain_pages(domain):
+    """Every page crawled for a domain, with its hit total and fetch status."""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT cp.url,
+                       cp.ok,
+                       cp.status_code,
+                       cp.crawled_at,
+                       COALESCE(SUM(sr.count), 0) AS hits
+                FROM crawled_pages cp
+                LEFT JOIN scrape_results sr ON sr.url = cp.url
+                WHERE cp.domain = %s
+                GROUP BY cp.url, cp.ok, cp.status_code, cp.crawled_at
+                ORDER BY cp.url
+            """, (domain,))
+            rows = cur.fetchall()
+    return jsonify([
+        {**dict(r), "crawled_at": r["crawled_at"].isoformat() if r["crawled_at"] else None}
+        for r in rows
+    ])
 
 
 @app.route("/api/heatmap")

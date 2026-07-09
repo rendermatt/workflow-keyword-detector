@@ -59,6 +59,25 @@ def init_db() -> None:
             ON scrape_results (keyword)
         """)
 
+        # One row per crawled page, tracking which domain it belongs to and
+        # whether the fetch succeeded. This is the authoritative record of crawl
+        # coverage (how many pages per domain, which paths/subdomains).
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS crawled_pages (
+                id          SERIAL      PRIMARY KEY,
+                run_id      TEXT        NOT NULL,
+                domain      TEXT        NOT NULL,   -- registrable domain of the seed
+                url         TEXT        NOT NULL UNIQUE,
+                ok          BOOLEAN     NOT NULL DEFAULT TRUE,
+                status_code INTEGER,
+                crawled_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain
+            ON crawled_pages (domain)
+        """)
+
         # Migrate pre-existing tables that predate feature_id / the unique key.
         cur.execute("ALTER TABLE scrape_results ADD COLUMN IF NOT EXISTS feature_id INTEGER")
         cur.execute("SELECT 1 FROM pg_constraint WHERE conname = %s", (_UNIQUE_CONSTRAINT,))
@@ -88,6 +107,28 @@ def save_result(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
         _save_result_csv(local_csv, run_id, url, keyword_counts)
     else:
         _save_result_db(run_id, url, keyword_counts)
+
+
+def record_page(
+    run_id: str, domain: str, url: str, ok: bool, status_code: int | None
+) -> None:
+    """Upsert a crawled page into crawled_pages (skipped in local CSV mode)."""
+    if os.environ.get("LOCAL_OUTPUT_CSV"):
+        return
+    with _cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO crawled_pages (run_id, domain, url, ok, status_code)
+            VALUES (%s, %s, %s, %s, %s)
+            ON CONFLICT (url) DO UPDATE
+                SET run_id      = EXCLUDED.run_id,
+                    domain      = EXCLUDED.domain,
+                    ok          = EXCLUDED.ok,
+                    status_code = EXCLUDED.status_code,
+                    crawled_at  = NOW()
+            """,
+            (run_id, domain, url, ok, status_code),
+        )
 
 
 def _save_result_db(run_id: str, url: str, keyword_counts: dict[str, int]) -> None:
