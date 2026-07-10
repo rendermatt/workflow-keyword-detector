@@ -72,11 +72,13 @@ def init_features_schema() -> None:
                     CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
                 )
             """)
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
-            cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
-            # Migrate older crawled_pages tables in place.
+            # Migrate older crawled_pages tables in place. These must run before
+            # the indexes/constraints below, since on a pre-existing table the
+            # CREATE TABLE above is a no-op and these columns won't exist yet.
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
             cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
             cur.execute("SELECT 1 FROM pg_constraint WHERE conname = 'crawled_pages_feature_url_key'")
             if not cur.fetchone():
