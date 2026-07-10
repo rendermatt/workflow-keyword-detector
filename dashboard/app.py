@@ -4,7 +4,7 @@ from flask import Flask, jsonify, render_template, request
 import psycopg2
 import psycopg2.extras
 
-from seed_data import SEED_FEATURES
+from seed_data import DEFAULT_FIT_PROMPT, SEED_FEATURES
 
 DB_URL = os.environ["DATABASE_URL"]
 
@@ -15,23 +15,9 @@ def get_conn():
     return psycopg2.connect(DB_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
-def _parse_keywords(raw) -> list[str]:
-    """Normalize keyword input (list, or comma/newline-separated string) into a
-    de-duplicated, order-preserving list of trimmed keywords."""
-    if isinstance(raw, str):
-        raw = raw.replace("\n", ",").split(",")
-    seen, result = set(), []
-    for kw in raw or []:
-        kw = (kw or "").strip()
-        key = kw.lower()
-        if kw and key not in seen:
-            seen.add(key)
-            result.append(kw)
-    return result
-
-
-def init_features_schema() -> None:
-    """Create the features tables if missing and seed a starter feature."""
+def init_schema() -> None:
+    """Create the tables the dashboard reads/writes, seed a starter feature, and
+    seed the default fit prompt. Idempotent — safe to run on every import."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
@@ -39,25 +25,19 @@ def init_features_schema() -> None:
                     id                SERIAL      PRIMARY KEY,
                     name              TEXT        NOT NULL UNIQUE,
                     documentation_url TEXT,
+                    fit_prompt        TEXT,
                     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS feature_keywords (
-                    id         SERIAL  PRIMARY KEY,
-                    feature_id INTEGER NOT NULL REFERENCES features (id) ON DELETE CASCADE,
-                    keyword    TEXT    NOT NULL,
-                    UNIQUE (feature_id, keyword)
-                )
-            """)
-            cur.execute("""
-                CREATE INDEX IF NOT EXISTS idx_feature_keywords_feature_id
-                ON feature_keywords (feature_id)
-            """)
+            # Per-feature prompt override (added in place for pre-existing tables).
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS fit_prompt TEXT")
 
-            # Crawl-coverage table (also created by the workflow's db.init_db);
-            # ensured here so the dashboard works before the first crawl runs.
+            # Crawl coverage (also created by the workflow's db.init_db); ensured
+            # here so the dashboard works before the first crawl runs. The
+            # ALTER ... ADD COLUMN migrations run BEFORE the indexes/constraints
+            # that reference them, since on a pre-existing table the CREATE above
+            # is a no-op and the columns won't exist yet.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS crawled_pages (
                     id             SERIAL      PRIMARY KEY,
@@ -72,11 +52,8 @@ def init_features_schema() -> None:
                     CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
                 )
             """)
-            # Migrate older crawled_pages tables in place. These must run before
-            # the indexes/constraints below, since on a pre-existing table the
-            # CREATE TABLE above is a no-op and these columns won't exist yet.
-            cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
+            cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
             cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
@@ -87,23 +64,54 @@ def init_features_schema() -> None:
                     "ADD CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)"
                 )
 
-            # Seed a starter feature only if none exist yet.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS fit_assessments (
+                    id             SERIAL      PRIMARY KEY,
+                    run_id         TEXT        NOT NULL,
+                    feature_id     INTEGER     NOT NULL,
+                    domain         TEXT        NOT NULL,
+                    fit_score      INTEGER,
+                    tier           TEXT,
+                    summary        TEXT,
+                    signals        JSONB,
+                    recommendation TEXT,
+                    model          TEXT,
+                    pages_analyzed INTEGER,
+                    error          TEXT,
+                    assessed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    CONSTRAINT fit_assessments_feature_domain_key UNIQUE (feature_id, domain)
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_fit_assessments_feature ON fit_assessments (feature_id)")
+
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key        TEXT        PRIMARY KEY,
+                    value      TEXT        NOT NULL,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+
+            # Seed a starter feature (with its own copy of the default prompt)
+            # only if none exist yet.
             cur.execute("SELECT COUNT(*) AS n FROM features")
             if cur.fetchone()["n"] == 0:
                 for feat in SEED_FEATURES:
                     cur.execute(
-                        "INSERT INTO features (name, documentation_url) VALUES (%s, %s) RETURNING id",
-                        (feat["name"], feat.get("documentation_url")),
+                        "INSERT INTO features (name, documentation_url, fit_prompt) "
+                        "VALUES (%s, %s, %s)",
+                        (feat["name"], feat.get("documentation_url"), DEFAULT_FIT_PROMPT),
                     )
-                    fid = cur.fetchone()["id"]
-                    kws = _parse_keywords(feat.get("keywords"))
-                    if kws:
-                        psycopg2.extras.execute_values(
-                            cur,
-                            "INSERT INTO feature_keywords (feature_id, keyword) VALUES %s",
-                            [(fid, kw) for kw in kws],
-                        )
 
+            # Seed the default fit prompt only if not present.
+            cur.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('fit_prompt', %s) "
+                "ON CONFLICT (key) DO NOTHING",
+                (DEFAULT_FIT_PROMPT,),
+            )
+
+
+# --- Pages -------------------------------------------------------------------
 
 @app.route("/")
 def index():
@@ -115,17 +123,22 @@ def features_page():
     return render_template("features.html")
 
 
+@app.route("/prompt")
+def prompt_page():
+    return render_template("prompt.html")
+
+
 @app.route("/docs")
 def docs_page():
-    """Explain what the crawler fetches and list the pages currently in the data."""
+    """Explain what the crawler + LLM assessment does, and list the pages that
+    have been crawled so far."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT url,
-                       COUNT(DISTINCT keyword) AS keywords_matched,
-                       SUM(count)              AS total_hits,
-                       MAX(scraped_at)         AS last_scraped
-                FROM scrape_results
+                       bool_and(ok)       AS ok,
+                       MAX(crawled_at)    AS last_crawled
+                FROM crawled_pages
                 GROUP BY url
                 ORDER BY url
             """)
@@ -146,137 +159,68 @@ def _selected_feature_id():
             return row["id"] if row else None
 
 
-def _feature_filter():
-    """A (sql_condition, params) pair scoping single-table (scrape_results or
-    crawled_pages) queries to the selected feature via its feature_id column.
-    Both tables now store feature_id, so re-use this in a WHERE clause:
-        f_cond, f_params = _feature_filter()
-        cur.execute(f"... WHERE {f_cond} ...", f_params)
-    """
-    fid = _selected_feature_id()
-    if fid is None:
-        return ("FALSE", [])
-    return ("feature_id = %s", [fid])
-
+# --- Fit APIs ----------------------------------------------------------------
 
 @app.route("/api/summary")
 def api_summary():
-    f_cond, f_params = _feature_filter()
+    """Headline numbers for the selected feature."""
+    fid = _selected_feature_id()
+    if fid is None:
+        return jsonify(customers=0, strong=0, avg_score=None, last_run_at=None)
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute(f"SELECT SUM(count) FROM scrape_results WHERE {f_cond}", f_params)
-            total_hits = cur.fetchone()["sum"] or 0
-            cur.execute(f"SELECT MAX(scraped_at) AS last_run FROM scrape_results WHERE {f_cond}", f_params)
-            last_run = cur.fetchone()["last_run"]
-            # Coverage for the selected feature. Pages skipped by robots.txt
-            # weren't fetched, so exclude them from the crawled count.
-            cur.execute(f"SELECT COUNT(DISTINCT domain) AS n FROM crawled_pages WHERE {f_cond}", f_params)
-            total_domains = cur.fetchone()["n"]
-            cur.execute(
-                f"SELECT COUNT(*) AS n FROM crawled_pages "
-                f"WHERE {f_cond} AND blocked_reason IS DISTINCT FROM 'robots-disallowed'",
-                f_params,
-            )
-            pages_crawled = cur.fetchone()["n"]
+            cur.execute("""
+                SELECT COUNT(*) FILTER (WHERE fit_score IS NOT NULL)       AS customers,
+                       COUNT(*) FILTER (WHERE fit_score >= 75)             AS strong,
+                       AVG(fit_score)                                      AS avg_score,
+                       MAX(assessed_at)                                    AS last_run
+                FROM fit_assessments
+                WHERE feature_id = %s
+            """, (fid,))
+            r = cur.fetchone()
     return jsonify(
-        total_domains=total_domains,
-        pages_crawled=pages_crawled,
-        total_hits=total_hits,
-        last_run_at=last_run.isoformat() if last_run else None,
+        customers=r["customers"],
+        strong=r["strong"],
+        avg_score=round(float(r["avg_score"]), 1) if r["avg_score"] is not None else None,
+        last_run_at=r["last_run"].isoformat() if r["last_run"] else None,
     )
 
 
-@app.route("/api/keywords")
-def api_keywords():
-    """Top keywords by total hit count across all runs."""
-    f_cond, f_params = _feature_filter()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT keyword, SUM(count) AS total
-                FROM scrape_results
-                WHERE {f_cond}
-                GROUP BY keyword
-                ORDER BY total DESC, keyword
-            """, f_params)
-            rows = cur.fetchall()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.route("/api/urls")
-def api_urls():
-    """Top URLs by total hit count across all runs."""
-    f_cond, f_params = _feature_filter()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(f"""
-                SELECT url, SUM(count) AS total
-                FROM scrape_results
-                WHERE {f_cond}
-                GROUP BY url
-                ORDER BY total DESC, url
-                LIMIT 30
-            """, f_params)
-            rows = cur.fetchall()
-    return jsonify([dict(r) for r in rows])
-
-
-@app.route("/api/domains")
-def api_domains():
-    """Crawl coverage per domain for the selected feature: pages crawled, total
-    keyword hits, and when it was last crawled."""
+@app.route("/api/fit")
+def api_fit():
+    """All fit assessments for the selected feature, best fit first."""
     fid = _selected_feature_id()
     if fid is None:
         return jsonify([])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT cp.domain,
-                       COUNT(DISTINCT cp.url) FILTER (
-                           WHERE cp.blocked_reason IS DISTINCT FROM 'robots-disallowed'
-                       )                                             AS pages_crawled,
-                       COUNT(DISTINCT cp.url) FILTER (WHERE cp.ok)   AS pages_ok,
-                       COUNT(DISTINCT cp.url) FILTER (
-                           WHERE cp.blocked_reason = 'robots-disallowed'
-                       )                                             AS pages_robots,
-                       MAX(cp.crawled_at)                            AS last_crawled,
-                       COALESCE(SUM(sr.count), 0)                    AS total_hits
-                FROM crawled_pages cp
-                LEFT JOIN scrape_results sr
-                       ON sr.url = cp.url AND sr.feature_id = cp.feature_id
-                WHERE cp.feature_id = %s
-                GROUP BY cp.domain
-                ORDER BY pages_crawled DESC, cp.domain
+                SELECT domain, fit_score, tier, summary, signals, recommendation,
+                       pages_analyzed, model, error, assessed_at
+                FROM fit_assessments
+                WHERE feature_id = %s
+                ORDER BY fit_score DESC NULLS LAST, domain
             """, (fid,))
             rows = cur.fetchall()
     return jsonify([
-        {**dict(r), "last_crawled": r["last_crawled"].isoformat() if r["last_crawled"] else None}
+        {**dict(r), "assessed_at": r["assessed_at"].isoformat() if r["assessed_at"] else None}
         for r in rows
     ])
 
 
 @app.route("/api/domains/<path:domain>/pages")
 def api_domain_pages(domain):
-    """Every page crawled for a domain (for the selected feature), with its hit
-    total and fetch status."""
+    """Every page crawled for a domain (for the selected feature) and its status."""
     fid = _selected_feature_id()
     if fid is None:
         return jsonify([])
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT cp.url,
-                       cp.ok,
-                       cp.status_code,
-                       cp.blocked_reason,
-                       cp.crawled_at,
-                       COALESCE(SUM(sr.count), 0) AS hits
-                FROM crawled_pages cp
-                LEFT JOIN scrape_results sr
-                       ON sr.url = cp.url AND sr.feature_id = cp.feature_id
-                WHERE cp.feature_id = %s AND cp.domain = %s
-                GROUP BY cp.url, cp.ok, cp.status_code, cp.blocked_reason, cp.crawled_at
-                ORDER BY cp.url
+                SELECT url, ok, status_code, blocked_reason, crawled_at
+                FROM crawled_pages
+                WHERE feature_id = %s AND domain = %s
+                ORDER BY url
             """, (fid, domain))
             rows = cur.fetchall()
     return jsonify([
@@ -287,13 +231,13 @@ def api_domain_pages(domain):
 
 @app.route("/api/crawl", methods=["POST"])
 def api_crawl():
-    """Kick off a crawl for a feature over a provided list of domains by
+    """Kick off a crawl + fit assessment for a feature over a list of domains by
     triggering the workflow's run_crawl task."""
     data = request.get_json(silent=True) or {}
     try:
         feature_id = int(data.get("feature_id"))
     except (TypeError, ValueError):
-        return jsonify(error="Select a feature to crawl for."), 400
+        return jsonify(error="Select a feature to assess."), 400
     domains = [
         d.strip() for d in (data.get("domains") or [])
         if isinstance(d, str) and d.strip()
@@ -303,16 +247,14 @@ def api_crawl():
 
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT name FROM features WHERE id = %s", (feature_id,))
+            cur.execute("SELECT name, documentation_url FROM features WHERE id = %s", (feature_id,))
             feature = cur.fetchone()
             if not feature:
                 return jsonify(error="Feature not found."), 404
-            cur.execute(
-                "SELECT COUNT(*) AS n FROM feature_keywords WHERE feature_id = %s",
-                (feature_id,),
-            )
-            if cur.fetchone()["n"] == 0:
-                return jsonify(error="This feature has no keywords to search for."), 400
+            if not feature["documentation_url"]:
+                return jsonify(
+                    error="This feature needs a documentation URL before it can be assessed."
+                ), 400
 
     slug = os.environ.get("WORKFLOW_SLUG")
     if not slug or not os.environ.get("RENDER_API_KEY"):
@@ -333,75 +275,28 @@ def api_crawl():
         except Exception:
             app.logger.exception("Failed to trigger crawl for feature %s", feature_id)
 
-    # Fire-and-forget: the crawl runs on the workflow service and streams its
-    # results into the DB; the dashboard will reflect them on refresh.
+    # Fire-and-forget: the crawl + assessment runs on the workflow service and
+    # streams results into the DB; the dashboard reflects them on refresh.
     threading.Thread(target=_trigger, daemon=True).start()
     return jsonify(status="started", feature=feature["name"], domains=len(domains)), 202
 
 
-@app.route("/api/heatmap")
-def api_heatmap():
-    """
-    Returns a matrix of url × keyword counts (only rows/cols with any hit).
-    Shape: { urls: [...], keywords: [...], matrix: [[count, ...], ...] }
-    """
-    f_cond, f_params = _feature_filter()
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            # Only URLs that had at least one hit
-            cur.execute(f"""
-                SELECT DISTINCT url
-                FROM scrape_results
-                WHERE count > 0 AND {f_cond}
-                ORDER BY url
-            """, f_params)
-            urls = [r["url"] for r in cur.fetchall()]
+# --- Feature management API --------------------------------------------------
 
-            # Only keywords that had at least one hit
-            cur.execute(f"""
-                SELECT DISTINCT keyword
-                FROM scrape_results
-                WHERE count > 0 AND {f_cond}
-                ORDER BY keyword
-            """, f_params)
-            keywords = [r["keyword"] for r in cur.fetchall()]
+def _default_prompt(cur):
+    """The editable global default prompt (fallback for features without one)."""
+    cur.execute("SELECT value FROM app_settings WHERE key = 'fit_prompt'")
+    row = cur.fetchone()
+    return row["value"] if row else DEFAULT_FIT_PROMPT
 
-            if not urls or not keywords:
-                return jsonify(urls=[], keywords=[], matrix=[])
-
-            cur.execute("""
-                SELECT url, keyword, SUM(count) AS total
-                FROM scrape_results
-                WHERE url = ANY(%s) AND keyword = ANY(%s)
-                GROUP BY url, keyword
-            """, (urls, keywords))
-            rows = cur.fetchall()
-
-    lookup = {(r["url"], r["keyword"]): int(r["total"]) for r in rows}
-    matrix = [
-        [lookup.get((url, kw), 0) for kw in keywords]
-        for url in urls
-    ]
-    return jsonify(urls=urls, keywords=keywords, matrix=matrix)
-
-
-# --- Feature management API ---------------------------------------------------
 
 def _fetch_features(cur):
-    """Return all features with their keywords as a list, newest first."""
     cur.execute("""
-        SELECT id, name, documentation_url, created_at, updated_at
+        SELECT id, name, documentation_url, fit_prompt, created_at, updated_at
         FROM features
         ORDER BY name
     """)
-    features = [dict(r) for r in cur.fetchall()]
-    cur.execute("SELECT feature_id, keyword FROM feature_keywords ORDER BY keyword")
-    by_feature: dict[int, list[str]] = {}
-    for r in cur.fetchall():
-        by_feature.setdefault(r["feature_id"], []).append(r["keyword"])
-    for f in features:
-        f["keywords"] = by_feature.get(f["id"], [])
-    return features
+    return [dict(r) for r in cur.fetchall()]
 
 
 @app.route("/api/features", methods=["GET"])
@@ -415,27 +310,25 @@ def api_list_features():
 def api_create_feature():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
+    doc_url = (data.get("documentation_url") or "").strip()
+    prompt = (data.get("fit_prompt") or "").strip()
     if not name:
         return jsonify(error="Name is required"), 400
-    doc_url = (data.get("documentation_url") or "").strip() or None
-    keywords = _parse_keywords(data.get("keywords"))
+    if not doc_url:
+        return jsonify(error="A documentation URL is required — it's what fit is judged against"), 400
 
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT 1 FROM features WHERE LOWER(name) = LOWER(%s)", (name,))
             if cur.fetchone():
                 return jsonify(error=f"A feature named “{name}” already exists"), 409
+            # Blank prompt → start from the global default so every feature has one.
             cur.execute(
-                "INSERT INTO features (name, documentation_url) VALUES (%s, %s) RETURNING id",
-                (name, doc_url),
+                "INSERT INTO features (name, documentation_url, fit_prompt) "
+                "VALUES (%s, %s, %s) RETURNING id",
+                (name, doc_url, prompt or _default_prompt(cur)),
             )
             fid = cur.fetchone()["id"]
-            if keywords:
-                psycopg2.extras.execute_values(
-                    cur,
-                    "INSERT INTO feature_keywords (feature_id, keyword) VALUES %s",
-                    [(fid, kw) for kw in keywords],
-                )
     return jsonify(id=fid), 201
 
 
@@ -443,10 +336,12 @@ def api_create_feature():
 def api_update_feature(feature_id):
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
+    doc_url = (data.get("documentation_url") or "").strip()
+    prompt = (data.get("fit_prompt") or "").strip()
     if not name:
         return jsonify(error="Name is required"), 400
-    doc_url = (data.get("documentation_url") or "").strip() or None
-    keywords = _parse_keywords(data.get("keywords"))
+    if not doc_url:
+        return jsonify(error="A documentation URL is required — it's what fit is judged against"), 400
 
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -459,19 +354,11 @@ def api_update_feature(feature_id):
             )
             if cur.fetchone():
                 return jsonify(error=f"A feature named “{name}” already exists"), 409
-
             cur.execute(
-                "UPDATE features SET name = %s, documentation_url = %s, updated_at = NOW() WHERE id = %s",
-                (name, doc_url, feature_id),
+                "UPDATE features SET name = %s, documentation_url = %s, "
+                "fit_prompt = %s, updated_at = NOW() WHERE id = %s",
+                (name, doc_url, prompt or _default_prompt(cur), feature_id),
             )
-            # Replace keyword set.
-            cur.execute("DELETE FROM feature_keywords WHERE feature_id = %s", (feature_id,))
-            if keywords:
-                psycopg2.extras.execute_values(
-                    cur,
-                    "INSERT INTO feature_keywords (feature_id, keyword) VALUES %s",
-                    [(feature_id, kw) for kw in keywords],
-                )
     return jsonify(id=feature_id)
 
 
@@ -482,12 +369,42 @@ def api_delete_feature(feature_id):
             cur.execute("DELETE FROM features WHERE id = %s", (feature_id,))
             if cur.rowcount == 0:
                 return jsonify(error="Feature not found"), 404
+            # No FK cascade — clean up the feature's derived data explicitly.
+            cur.execute("DELETE FROM fit_assessments WHERE feature_id = %s", (feature_id,))
+            cur.execute("DELETE FROM crawled_pages WHERE feature_id = %s", (feature_id,))
     return jsonify(ok=True)
 
 
-# Ensure the features schema exists whenever the app is imported (e.g. by
-# gunicorn) or run directly.
-init_features_schema()
+# --- Prompt settings API -----------------------------------------------------
+
+@app.route("/api/settings/prompt", methods=["GET"])
+def api_get_prompt():
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM app_settings WHERE key = 'fit_prompt'")
+            row = cur.fetchone()
+    prompt = row["value"] if row else DEFAULT_FIT_PROMPT
+    return jsonify(prompt=prompt, default=DEFAULT_FIT_PROMPT)
+
+
+@app.route("/api/settings/prompt", methods=["PUT"])
+def api_set_prompt():
+    data = request.get_json(silent=True) or {}
+    prompt = (data.get("prompt") or "").strip()
+    if not prompt:
+        return jsonify(error="The prompt can't be empty"), 400
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('fit_prompt', %s) "
+                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+                (prompt,),
+            )
+    return jsonify(ok=True)
+
+
+# Ensure the schema exists whenever the app is imported (e.g. by gunicorn).
+init_schema()
 
 
 if __name__ == "__main__":

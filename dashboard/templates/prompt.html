@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prompt · Fit Detector</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --bg: #0f1117; --surface: #1a1d27; --surface2: #23263a; --border: #2e3148;
+      --accent: #6c63ff; --accent2: #00d4aa; --danger: #ef4444; --text: #e2e8f0; --muted: #8891aa; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 20px; }
+    header .brand { display: flex; align-items: center; gap: 12px; }
+    header h1 { font-size: 18px; font-weight: 600; }
+    nav { display: flex; gap: 4px; margin-left: 12px; }
+    nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 8px; }
+    nav a:hover, nav a.active { color: var(--text); background: var(--surface2); }
+    .container { max-width: 900px; margin: 0 auto; padding: 24px 32px; }
+    h2 { font-size: 20px; margin-bottom: 8px; }
+    .subtitle { color: var(--muted); margin-bottom: 24px; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; }
+    label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+    textarea { width: 100%; min-height: 420px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6; padding: 14px; resize: vertical; }
+    textarea:focus { outline: none; border-color: var(--accent); }
+    .placeholders { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
+    .ph { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; color: var(--accent2); }
+    .callout { border-left: 3px solid var(--accent); background: var(--surface2); border-radius: 0 8px 8px 0; padding: 12px 16px; margin-bottom: 18px; color: var(--text); font-size: 13px; }
+    .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+    button { font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 8px; border: 1px solid transparent; padding: 9px 16px; }
+    .btn-primary { background: var(--accent); color: #fff; } .btn-primary:hover { background: #5a52e0; }
+    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); } .btn-ghost:hover { background: var(--surface2); }
+    .status { font-size: 13px; } .status.ok { color: var(--accent2); } .status.err { color: var(--danger); }
+  </style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+    <h1>Fit Detector</h1>
+  </div>
+  <nav>
+    <a href="/">Dashboard</a>
+    <a href="/features">Features</a>
+    <a href="/prompt" class="active">Prompt</a>
+    <a href="/docs">Docs</a>
+  </nav>
+</header>
+<div class="container">
+  <h2>Default Fit Prompt</h2>
+  <p class="subtitle">The starting prompt new features inherit (and the fallback for any feature without its own). To change how a <em>specific</em> feature is judged, edit that feature's prompt on the <a href="/features" style="color:var(--accent2)">Features</a> page — this default doesn't overwrite prompts features already have.</p>
+  <div class="panel">
+    <div class="callout">The placeholders below are filled in automatically for each company before the prompt is sent. Keep them in the text so the model gets the feature docs and the crawled content.</div>
+    <div class="placeholders" id="placeholders">{% raw %}
+      <span class="ph">{{FEATURE_NAME}}</span>
+      <span class="ph">{{FEATURE_DOCUMENTATION}}</span>
+      <span class="ph">{{CUSTOMER_DOMAIN}}</span>
+      <span class="ph">{{CRAWLED_CONTENT}}</span>
+    {% endraw %}</div>
+    <label for="prompt" style="margin-top:16px">Prompt template</label>
+    <textarea id="prompt" placeholder="Loading…"></textarea>
+    <div class="actions">
+      <button class="btn-primary" id="save-btn" onclick="save()">Save Prompt</button>
+      <button class="btn-ghost" onclick="resetDefault()">Reset to default</button>
+      <span class="status" id="status"></span>
+    </div>
+  </div>
+</div>
+<script>
+let defaultPrompt = '';
+function setStatus(msg, kind) { const el = document.getElementById('status'); el.textContent = msg || ''; el.className = 'status' + (kind ? ' ' + kind : ''); }
+async function load() {
+  const data = await fetch('/api/settings/prompt').then(r => r.json());
+  defaultPrompt = data.default || '';
+  document.getElementById('prompt').value = data.prompt || '';
+}
+async function save() {
+  const prompt = document.getElementById('prompt').value.trim();
+  if (!prompt) { setStatus('The prompt can\'t be empty.', 'err'); return; }
+  const btn = document.getElementById('save-btn'); btn.disabled = true; setStatus('Saving…');
+  try {
+    const res = await fetch('/api/settings/prompt', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { setStatus(data.error || 'Failed to save.', 'err'); return; }
+    setStatus('Saved. New features will start from this prompt.', 'ok');
+  } catch (e) { console.error(e); setStatus('Failed to save.', 'err'); }
+  finally { btn.disabled = false; }
+}
+function resetDefault() {
+  if (!confirm('Replace the current prompt with the built-in default? (You still need to Save.)')) return;
+  document.getElementById('prompt').value = defaultPrompt;
+  setStatus('Default loaded — click Save to apply.', 'ok');
+}
+load().catch(e => { console.error(e); setStatus('Could not load the prompt.', 'err'); });
+</script>
+</body>
+</html>

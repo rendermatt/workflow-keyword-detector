@@ -3,224 +3,101 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Docs · Keyword Scraper</title>
+  <title>Docs · Fit Detector</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --surface2: #23263a;
-      --border: #2e3148;
-      --accent: #6c63ff;
-      --accent2: #00d4aa;
-      --text: #e2e8f0;
-      --muted: #8891aa;
-    }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      line-height: 1.6;
-    }
-
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 16px 32px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+    :root { --bg: #0f1117; --surface: #1a1d27; --surface2: #23263a; --border: #2e3148;
+      --accent: #6c63ff; --accent2: #00d4aa; --text: #e2e8f0; --muted: #8891aa; --danger: #ef4444; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.6; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 12px; }
     header .brand { display: flex; align-items: center; gap: 12px; }
     header h1 { font-size: 18px; font-weight: 600; }
     nav { display: flex; gap: 4px; margin-left: 12px; }
-    nav a {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 13px;
-      padding: 6px 12px;
-      border-radius: 8px;
-    }
-    nav a:hover { color: var(--text); background: var(--surface2); }
-    nav a.active { color: var(--text); background: var(--surface2); }
-
+    nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 8px; }
+    nav a:hover, nav a.active { color: var(--text); background: var(--surface2); }
     .container { max-width: 860px; margin: 0 auto; padding: 32px; }
-
     h2 { font-size: 20px; font-weight: 600; margin-bottom: 8px; }
     .subtitle { color: var(--muted); margin-bottom: 28px; }
-
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 22px 26px;
-      margin-bottom: 22px;
-    }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 26px; margin-bottom: 22px; }
     .panel h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; }
-    .panel p { color: var(--text); margin-bottom: 10px; }
-    .panel p:last-child { margin-bottom: 0; }
-    .muted { color: var(--muted); }
-
-    /* Ordered steps */
+    .panel p { margin-bottom: 10px; } .panel p:last-child { margin-bottom: 0; } .muted { color: var(--muted); }
     ol.steps { list-style: none; counter-reset: step; }
-    ol.steps li {
-      counter-increment: step;
-      position: relative;
-      padding-left: 40px;
-      margin-bottom: 14px;
-    }
+    ol.steps li { counter-increment: step; position: relative; padding-left: 40px; margin-bottom: 14px; }
     ol.steps li:last-child { margin-bottom: 0; }
-    ol.steps li::before {
-      content: counter(step);
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 26px;
-      height: 26px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--accent2);
-    }
+    ol.steps li::before { content: counter(step); position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+      background: var(--surface2); border: 1px solid var(--border); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: var(--accent2); }
     ol.steps li strong { color: var(--text); }
-    code {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      padding: 1px 6px;
-      font-size: 12.5px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-
-    .callout {
-      border-left: 3px solid var(--accent);
-      background: var(--surface2);
-      border-radius: 0 8px 8px 0;
-      padding: 12px 16px;
-      color: var(--text);
-      margin-top: 6px;
-    }
+    code { background: var(--surface2); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; font-size: 12.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .callout { border-left: 3px solid var(--accent); background: var(--surface2); border-radius: 0 8px 8px 0; padding: 12px 16px; color: var(--text); margin-top: 6px; }
     .callout strong { color: var(--accent); }
-
-    /* Pages table */
-    .pages-head {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      gap: 12px;
-    }
-    .badge {
-      font-size: 11px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 99px;
-      padding: 2px 10px;
-      color: var(--muted);
-      white-space: nowrap;
-    }
+    .pages-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 12px; gap: 12px; }
+    .badge { font-size: 11px; background: var(--surface2); border: 1px solid var(--border); border-radius: 99px; padding: 2px 10px; color: var(--muted); white-space: nowrap; }
     .table-scroll { overflow-x: auto; }
     table.pages { width: 100%; border-collapse: collapse; font-size: 13px; }
-    table.pages th {
-      text-align: left;
-      padding: 8px 10px;
-      color: var(--muted);
-      font-weight: 500;
-      border-bottom: 1px solid var(--border);
-      white-space: nowrap;
-    }
-    table.pages td {
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: top;
-    }
+    table.pages th { text-align: left; padding: 8px 10px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    table.pages td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
     table.pages tr:last-child td { border-bottom: none; }
-    table.pages td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    table.pages a { color: var(--accent2); text-decoration: none; word-break: break-all; }
-    table.pages a:hover { text-decoration: underline; }
+    table.pages a { color: var(--accent2); text-decoration: none; word-break: break-all; } table.pages a:hover { text-decoration: underline; }
+    .ok { color: var(--accent2); } .err { color: var(--danger); }
     .empty { color: var(--muted); text-align: center; padding: 28px; font-style: italic; }
   </style>
 </head>
 <body>
-
 <header>
   <div class="brand">
-    <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-      <path stroke-linecap="round" stroke-linejoin="round"
-        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-    </svg>
-    <h1>Keyword Scraper</h1>
+    <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+    <h1>Fit Detector</h1>
   </div>
   <nav>
     <a href="/">Dashboard</a>
     <a href="/features">Features</a>
+    <a href="/prompt">Prompt</a>
     <a href="/docs" class="active">Docs</a>
   </nav>
 </header>
-
 <div class="container">
-  <h2>What this app crawls</h2>
-  <p class="subtitle">A quick reference for how pages are fetched and scanned for feature keywords.</p>
+  <h2>How fit scoring works</h2>
+  <p class="subtitle">The app crawls a prospect's website, then asks Claude how well that company fits one of your features.</p>
 
   <div class="panel">
-    <h3>How the crawl works</h3>
+    <h3>The pipeline</h3>
     <ol class="steps">
-      <li>You start a crawl from the dashboard's <strong>New Crawl</strong> button: pick a feature and upload a CSV of seed domains. A bare domain like <code>example.com</code> is treated as <code>https://example.com</code>.</li>
-      <li>The workflow loads that <strong>feature's keywords from the database</strong> and, starting from each seed, fetches the page and <strong>follows links to other pages on the same domain</strong> — breadth-first — to reach documentation, blog posts, job postings, and the like. (15-second request timeout, bot <code>User-Agent</code>.)</li>
-      <li>"Same domain" means the same <strong>registrable domain, including subdomains</strong>: from <code>example.com</code> it will crawl <code>docs.example.com</code>, <code>example.com/careers</code>, and so on. Off-domain links are ignored.</li>
-      <li>On each page, <code>&lt;script&gt;</code> and <code>&lt;style&gt;</code> tags are stripped and the visible text is lowercased. For every keyword in the selected feature, it counts <strong>case-insensitive substring matches</strong>.</li>
-      <li>Keyword counts are <strong>upserted</strong> per (feature, URL, keyword) and every fetched page is recorded, so re-crawling a feature refreshes the numbers instead of double-counting.</li>
+      <li>You start a crawl from the dashboard's <strong>New Crawl</strong> button: pick a feature and upload a CSV of company domains. A bare domain like <code>example.com</code> is treated as <code>https://example.com</code>.</li>
+      <li>The workflow first fetches the <strong>feature's documentation page</strong> so the model knows what the feature actually does.</li>
+      <li>For each company, starting from its seed domain, it <strong>follows links across the same registrable domain</strong> (including subdomains) — breadth-first — gathering visible text from marketing pages, docs, blog posts, careers pages, and the like. (15-second timeout, honors <code>robots.txt</code>.)</li>
+      <li>The feature documentation plus the crawled site text are sent to <strong>Claude</strong>, which returns a structured <strong>fit score (0-100)</strong>, a tier, a plain-language summary, the concrete signals it found, and a recommended sales angle.</li>
+      <li>Results are <strong>upserted</strong> per (feature, company), so re-crawling a feature refreshes the scores instead of duplicating them.</li>
     </ol>
     <div class="callout">
-      <strong>Bounded &amp; polite.</strong> Each domain crawl stops after <code>CRAWL_MAX_PAGES</code> pages (default 50) and <strong>honors each host's <code>robots.txt</code></strong> — disallowed URLs are skipped and logged on the domain's detail view. The crawler does not execute JavaScript, so content rendered only client-side won't be seen.
+      <strong>Bounded &amp; polite.</strong> Each crawl stops after <code>CRAWL_MAX_PAGES</code> pages (default 50) or once <code>CRAWL_CONTENT_CHARS</code> of text is gathered, and skips URLs disallowed by <code>robots.txt</code>. The crawler doesn't execute JavaScript, so content rendered only client-side won't be seen. The exact judgment is controlled by the editable <a href="/prompt" style="color:var(--accent2)">prompt</a>.
     </div>
   </div>
 
   <div class="panel">
     <div class="pages-head">
-      <h3>Pages in the current results</h3>
+      <h3>Pages crawled so far</h3>
       <span class="badge">{{ pages|length }} page{{ '' if pages|length == 1 else 's' }}</span>
     </div>
-    <p class="muted" style="margin-bottom:16px">
-      These are the URLs that appear in the crawled data so far, across all features. To crawl more
-      pages, use <strong>New Crawl</strong> on the dashboard to run a feature over a list of domains.
-    </p>
+    <p class="muted" style="margin-bottom:16px">URLs that appear in the crawl data across all features. Use <strong>New Crawl</strong> on the dashboard to crawl and score more companies.</p>
     {% if pages %}
     <div class="table-scroll">
       <table class="pages">
-        <thead>
-          <tr>
-            <th>URL</th>
-            <th class="num">Keywords matched</th>
-            <th class="num">Total hits</th>
-            <th>Last scraped</th>
-          </tr>
-        </thead>
+        <thead><tr><th>URL</th><th>Status</th><th>Last crawled</th></tr></thead>
         <tbody>
           {% for p in pages %}
           <tr>
             <td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.url }}</a></td>
-            <td class="num">{{ p.keywords_matched }}</td>
-            <td class="num">{{ p.total_hits or 0 }}</td>
-            <td class="muted">{{ p.last_scraped.strftime('%b %d, %Y %H:%M UTC') if p.last_scraped else '—' }}</td>
+            <td>{% if p.ok %}<span class="ok">ok</span>{% else %}<span class="err">failed</span>{% endif %}</td>
+            <td class="muted">{{ p.last_crawled.strftime('%b %d, %Y %H:%M UTC') if p.last_crawled else '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>
       </table>
     </div>
     {% else %}
-    <div class="empty">No pages scraped yet — run the workflow to populate this list.</div>
+    <div class="empty">No pages crawled yet — run a crawl from the dashboard to populate this list.</div>
     {% endif %}
   </div>
 </div>
-
 </body>
 </html>

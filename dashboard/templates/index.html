@@ -3,355 +3,136 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Keyword Scraper Dashboard</title>
+  <title>Fit Detector Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --surface2: #23263a;
-      --border: #2e3148;
-      --accent: #6c63ff;
-      --accent2: #00d4aa;
-      --text: #e2e8f0;
-      --muted: #8891aa;
-      --hit: #6c63ff;
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #23263a; --border: #2e3148;
+      --accent: #6c63ff; --accent2: #00d4aa; --text: #e2e8f0; --muted: #8891aa;
+      --strong: #22c55e; --promising: #38bdf8; --weak: #f5a623; --unlikely: #ef4444;
     }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 16px 32px;
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
+    body { background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 16px 32px; display: flex; align-items: center; gap: 12px; }
     header h1 { font-size: 18px; font-weight: 600; }
-    header span { color: var(--muted); font-size: 13px; }
+    header span.tag { color: var(--muted); font-size: 13px; }
     header nav { display: flex; gap: 4px; margin-left: auto; }
-    header nav a {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 13px;
-      padding: 6px 12px;
-      border-radius: 8px;
-    }
-    header nav a:hover { color: var(--text); background: var(--surface2); }
-    header nav a.active { color: var(--text); background: var(--surface2); }
+    header nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 8px; }
+    header nav a:hover, header nav a.active { color: var(--text); background: var(--surface2); }
     .feature-select { display: flex; align-items: center; gap: 8px; }
-    .feature-select label {
-      font-size: 12px;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: .04em;
-    }
-    .feature-select select {
-      background: var(--surface2);
-      color: var(--text);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      font-family: inherit;
-      font-size: 13px;
-      padding: 7px 12px;
-      cursor: pointer;
-    }
+    .feature-select label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    .feature-select select { background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; font-family: inherit; font-size: 13px; padding: 7px 12px; cursor: pointer; }
     .feature-select select:focus { outline: none; border-color: var(--accent); }
-    .new-crawl-btn {
-      font-family: inherit; font-size: 13px; cursor: pointer;
-      background: var(--accent); color: #fff; border: none;
-      border-radius: 8px; padding: 7px 14px;
-    }
+    .new-crawl-btn { font-family: inherit; font-size: 13px; cursor: pointer; background: var(--accent);
+      color: #fff; border: none; border-radius: 8px; padding: 7px 14px; }
     .new-crawl-btn:hover { background: #5a52e0; }
+    .new-crawl-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 28px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; }
+    .card-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
+    .card-value { font-size: 28px; font-weight: 700; color: var(--accent); }
+    .card-value.sm { font-size: 17px; font-weight: 600; }
+
+    .grid { display: grid; grid-template-columns: 320px 1fr; gap: 20px; margin-bottom: 28px; }
+    @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; }
+    .section-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+    .section-title .badge { font-size: 11px; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 99px; padding: 2px 10px; color: var(--muted); font-weight: 400; }
+    .dist-legend { margin-top: 14px; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; }
+    .dist-legend .row { display: flex; align-items: center; gap: 8px; }
+    .dist-legend .dot { width: 10px; height: 10px; border-radius: 3px; }
+    .dist-legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    /* Fit leaderboard */
+    .fit-list { display: flex; flex-direction: column; gap: 10px; }
+    .fit-row { display: grid; grid-template-columns: 210px 1fr auto; align-items: center; gap: 14px;
+      padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); cursor: pointer; }
+    .fit-row:hover { border-color: var(--accent); }
+    .fit-domain { font-weight: 600; word-break: break-all; }
+    .fit-domain .meta { display: block; font-weight: 400; color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .fit-bar-wrap { display: flex; align-items: center; gap: 10px; }
+    .fit-bar-track { flex: 1; height: 8px; background: var(--surface2); border-radius: 99px; overflow: hidden; }
+    .fit-bar { height: 100%; border-radius: 99px; }
+    .fit-score { min-width: 34px; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .tier { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+      border-radius: 99px; padding: 3px 10px; white-space: nowrap; }
+    .tier.strong { background: rgba(34,197,94,.15); color: var(--strong); }
+    .tier.promising { background: rgba(56,189,248,.15); color: var(--promising); }
+    .tier.weak { background: rgba(245,166,35,.15); color: var(--weak); }
+    .tier.unlikely { background: rgba(239,68,68,.15); color: var(--unlikely); }
+    .tier.pending { background: var(--surface2); color: var(--muted); }
+
+    .loading, .empty { color: var(--muted); text-align: center; padding: 40px; font-size: 13px; }
+
+    /* Modal */
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none;
+      align-items: flex-start; justify-content: center; padding: 48px 20px; overflow-y: auto; z-index: 50; }
+    .modal-backdrop.open { display: flex; }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 720px; padding: 22px 24px; }
+    .modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+    .modal-head h2 { font-size: 17px; font-weight: 600; word-break: break-all; }
+    .modal-close { background: transparent; border: 1px solid var(--border); color: var(--text);
+      border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+    .modal-close:hover { background: var(--surface2); }
+    .modal-body { max-height: 68vh; overflow-y: auto; margin-top: 12px; }
+    .score-head { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; }
+    .score-big { font-size: 42px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .subhead { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 18px 0 8px; }
+    .assess-summary { font-size: 14px; line-height: 1.6; }
+    .signals { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+    .signals li { position: relative; padding-left: 20px; font-size: 13.5px; line-height: 1.5; }
+    .signals li::before { content: "›"; position: absolute; left: 4px; color: var(--accent2); font-weight: 700; }
+    .reco { background: var(--surface2); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 12px 14px; font-size: 13.5px; }
+    .err { color: var(--unlikely); font-size: 13px; }
+    /* Crawl coverage inside modal */
+    table.pages { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
+    table.pages th { text-align: left; padding: 6px 10px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); }
+    table.pages td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    table.pages a { color: var(--text); text-decoration: none; word-break: break-all; }
+    table.pages a:hover { color: var(--accent2); text-decoration: underline; }
+    .status-ok { color: var(--accent2); } .status-err { color: var(--unlikely); }
+    .robots-badge { display: inline-block; background: rgba(245,166,35,.14); border: 1px solid rgba(245,166,35,.4);
+      color: var(--weak); border-radius: 6px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; }
+    details > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
 
     /* Crawl modal form */
     .crawl-field { margin-bottom: 18px; }
-    .crawl-field label {
-      display: block; font-size: 12px; color: var(--muted);
-      margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em;
-    }
-    .crawl-field select {
-      width: 100%; background: var(--bg); color: var(--text);
-      border: 1px solid var(--border); border-radius: 8px;
-      font-family: inherit; font-size: 14px; padding: 9px 12px;
-    }
-    .crawl-field select:focus { outline: none; border-color: var(--accent); }
+    .crawl-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
+    .crawl-field select { width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border);
+      border-radius: 8px; font-family: inherit; font-size: 14px; padding: 9px 12px; }
     .crawl-field .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
-    .crawl-field .hint code {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 4px; padding: 0 4px; font-size: 11px;
-    }
-    .file-drop {
-      display: flex; align-items: center; gap: 12px;
-      border: 1px dashed var(--border); border-radius: 8px;
-      padding: 14px; background: var(--bg);
-    }
-    .file-btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      background: var(--surface2); border: 1px solid var(--border);
-      color: var(--text); border-radius: 8px; padding: 7px 14px;
-      cursor: pointer; font-size: 13px; white-space: nowrap;
-    }
+    .crawl-field .hint code { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; font-size: 11px; }
+    .file-drop { display: flex; align-items: center; gap: 12px; border: 1px dashed var(--border); border-radius: 8px; padding: 14px; background: var(--bg); }
+    .file-btn { display: inline-flex; align-items: center; gap: 6px; background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px; padding: 7px 14px; cursor: pointer; font-size: 13px; white-space: nowrap; }
     .file-btn:hover { border-color: var(--accent); }
     .file-info { font-size: 13px; color: var(--muted); }
     .crawl-status { font-size: 13px; margin-top: 4px; min-height: 1em; }
-    .crawl-status.ok { color: var(--accent2); }
-    .crawl-status.err { color: #ff6384; }
-    .domain-preview {
-      margin-top: 10px; max-height: 140px; overflow-y: auto;
-      font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace;
-      display: none;
-    }
+    .crawl-status.ok { color: var(--accent2); } .crawl-status.err { color: var(--unlikely); }
+    .domain-preview { margin-top: 10px; max-height: 140px; overflow-y: auto; font-size: 12px; color: var(--muted);
+      font-family: ui-monospace, Menlo, monospace; display: none; }
     .domain-preview.show { display: block; }
-
-    .container { max-width: 1400px; margin: 0 auto; padding: 24px 32px; }
-
-    /* Summary cards */
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 16px;
-      margin-bottom: 32px;
-    }
-    .card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px 24px;
-    }
-    .card-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; margin-bottom: 6px; }
-    .card-value { font-size: 28px; font-weight: 700; color: var(--accent); }
-    .card-value.card-value-sm { font-size: 17px; font-weight: 600; }
-
-    /* Section */
-    .section-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .section-title .badge {
-      font-size: 11px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 99px;
-      padding: 2px 10px;
-      color: var(--muted);
-      font-weight: 400;
-    }
-
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 20px;
-      margin-bottom: 28px;
-    }
-    @media (max-width: 900px) { .grid-2 { grid-template-columns: 1fr; } }
-
-    .panel {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 20px 24px;
-    }
-
-    .chart-wrap { position: relative; }
-    .chart-wrap canvas { max-height: 380px; }
-
-    /* Heatmap */
-    .heatmap-scroll { overflow-x: auto; margin-top: 8px; }
-    table.heatmap {
-      border-collapse: collapse;
-      font-size: 12px;
-      white-space: nowrap;
-    }
-    table.heatmap th {
-      padding: 4px 10px;
-      color: var(--muted);
-      font-weight: 500;
-      text-align: left;
-      position: sticky;
-      top: 0;
-      background: var(--surface);
-    }
-    table.heatmap th.col-head {
-      writing-mode: vertical-rl;
-      transform: rotate(180deg);
-      padding: 10px 4px;
-      max-width: 28px;
-      text-align: left;
-    }
-    table.heatmap td {
-      padding: 4px 10px;
-      border: 1px solid var(--border);
-    }
-    table.heatmap td.url-cell {
-      font-size: 12px;
-      color: var(--muted);
-      max-width: 240px;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      position: sticky;
-      left: 0;
-      background: var(--surface);
-      z-index: 1;
-    }
-    table.heatmap td.count-cell {
-      text-align: center;
-      min-width: 28px;
-      font-weight: 600;
-    }
-
-    /* Run comparison */
-    .runs-full { margin-bottom: 28px; }
-
-    /* Loading / empty */
-    .loading {
-      color: var(--muted);
-      text-align: center;
-      padding: 40px;
-      font-size: 13px;
-    }
-
-    /* Runs list */
-    .runs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .runs-table th {
-      text-align: left;
-      padding: 8px 12px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      font-weight: 500;
-    }
-    .runs-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
-    .runs-table tr:last-child td { border-bottom: none; }
-    .pill {
-      display: inline-block;
-      background: var(--surface2);
-      border-radius: 99px;
-      padding: 2px 10px;
-      font-size: 11px;
-      color: var(--accent2);
-      font-family: monospace;
-    }
-
-    /* Coverage table */
-    .cov-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    .cov-table th {
-      text-align: left;
-      padding: 8px 12px;
-      color: var(--muted);
-      border-bottom: 1px solid var(--border);
-      font-weight: 500;
-    }
-    .cov-table th.num, .cov-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    .cov-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
-    .cov-table tr:last-child td { border-bottom: none; }
-    .cov-table tbody tr { cursor: pointer; }
-    .cov-table tbody tr:hover { background: var(--surface2); }
-    .cov-domain { color: var(--text); font-weight: 500; }
-    .cov-bar-wrap { display: flex; align-items: center; gap: 10px; }
-    .cov-bar {
-      height: 6px;
-      border-radius: 99px;
-      background: var(--accent);
-      min-width: 2px;
-    }
-    .cov-caption { color: var(--muted); font-size: 12px; margin-top: 12px; }
-
-    /* Modal */
-    .modal-backdrop {
-      position: fixed; inset: 0;
-      background: rgba(0,0,0,.6);
-      display: none;
-      align-items: flex-start;
-      justify-content: center;
-      padding: 48px 20px;
-      overflow-y: auto;
-      z-index: 50;
-    }
-    .modal-backdrop.open { display: flex; }
-    .modal {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      width: 100%;
-      max-width: 820px;
-      padding: 22px 24px;
-    }
-    .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; gap: 12px; }
-    .modal-head h2 { font-size: 17px; font-weight: 600; }
-    .modal-close {
-      background: transparent; border: 1px solid var(--border); color: var(--text);
-      border-radius: 8px; padding: 6px 12px; cursor: pointer; font-size: 13px;
-    }
-    .modal-close:hover { background: var(--surface2); }
-    .modal-sub { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
-    .modal-body { max-height: 60vh; overflow-y: auto; }
-    .host-group { margin-bottom: 18px; }
-    .host-group:last-child { margin-bottom: 0; }
-    .host-title {
-      font-size: 13px; font-weight: 600; color: var(--accent2);
-      margin-bottom: 6px; word-break: break-all;
-    }
-    table.pages { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-    table.pages th {
-      text-align: left; padding: 6px 10px; color: var(--muted); font-weight: 500;
-      border-bottom: 1px solid var(--border); white-space: nowrap;
-    }
-    table.pages th.num, table.pages td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    table.pages td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-    table.pages tr:last-child td { border-bottom: none; }
-    table.pages a { color: var(--text); text-decoration: none; word-break: break-all; }
-    table.pages a:hover { color: var(--accent2); text-decoration: underline; }
-    .status-ok { color: var(--accent2); }
-    .status-err { color: #ff6384; }
-    .cf-badge {
-      display: inline-block;
-      background: rgba(255,99,132,.14);
-      border: 1px solid rgba(255,99,132,.4);
-      color: #ff8fa3;
-      border-radius: 6px;
-      padding: 1px 8px;
-      font-size: 11.5px;
-      white-space: nowrap;
-    }
-    .robots-badge {
-      display: inline-block;
-      background: rgba(255,205,86,.14);
-      border: 1px solid rgba(255,205,86,.4);
-      color: #ffcd56;
-      border-radius: 6px;
-      padding: 1px 8px;
-      font-size: 11.5px;
-      white-space: nowrap;
-    }
-    .robots-note { color: #ffcd56; }
   </style>
 </head>
 <body>
 
 <header>
   <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-    <path stroke-linecap="round" stroke-linejoin="round"
-      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+    <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
   </svg>
-  <h1>Keyword Scraper</h1>
-  <span>Workflow &amp; AI keyword detection dashboard</span>
+  <h1>Fit Detector</h1>
+  <span class="tag">AI fit scoring for prospect sites</span>
   <nav>
     <a href="/" class="active">Dashboard</a>
     <a href="/features">Features</a>
+    <a href="/prompt">Prompt</a>
     <a href="/docs">Docs</a>
   </nav>
   <div class="feature-select">
@@ -362,84 +143,57 @@
 </header>
 
 <div class="container">
-
-  <!-- Summary cards -->
-  <div class="cards" id="cards">
-    <div class="card"><div class="card-label">Domains</div><div class="card-value" id="c-domains">—</div></div>
-    <div class="card"><div class="card-label">Pages Crawled</div><div class="card-value" id="c-pages">—</div></div>
-    <div class="card"><div class="card-label">Total Hits</div><div class="card-value" id="c-hits">—</div></div>
-    <div class="card"><div class="card-label">Last Run</div><div class="card-value card-value-sm" id="c-lastrun">—</div></div>
+  <div class="cards">
+    <div class="card"><div class="card-label">Companies Assessed</div><div class="card-value" id="c-customers">—</div></div>
+    <div class="card"><div class="card-label">Strong Fits</div><div class="card-value" id="c-strong">—</div></div>
+    <div class="card"><div class="card-label">Avg Fit Score</div><div class="card-value" id="c-avg">—</div></div>
+    <div class="card"><div class="card-label">Last Run</div><div class="card-value sm" id="c-lastrun">—</div></div>
   </div>
 
-  <!-- Crawl coverage -->
-  <div class="panel" style="margin-bottom:28px">
-    <div class="section-title">Crawl Coverage <span class="badge">pages crawled per domain</span></div>
-    <div id="coverage-container"><div class="loading">Loading…</div></div>
-  </div>
-
-  <!-- Top Keywords + Top URLs -->
-  <div class="grid-2">
+  <div class="grid">
     <div class="panel">
-      <div class="section-title">Top Keywords <span class="badge">by total hits</span></div>
-      <div class="chart-wrap"><canvas id="chart-keywords"></canvas></div>
+      <div class="section-title">Fit Distribution</div>
+      <div style="position:relative;height:180px"><canvas id="chart-dist"></canvas></div>
+      <div class="dist-legend" id="dist-legend"></div>
     </div>
     <div class="panel">
-      <div class="section-title">Top URLs <span class="badge">by total hits</span></div>
-      <div class="chart-wrap"><canvas id="chart-urls"></canvas></div>
+      <div class="section-title">Company Fit <span class="badge">ranked by fit score</span></div>
+      <div id="fit-container"><div class="loading">Loading…</div></div>
     </div>
   </div>
-
-  <!-- Heatmap -->
-  <div class="panel" style="margin-bottom:28px">
-    <div class="section-title">URL × Keyword Heatmap <span class="badge">only hits &gt; 0</span></div>
-    <div class="heatmap-scroll" id="heatmap-container">
-      <div class="loading">Loading…</div>
-    </div>
-  </div>
-
 </div>
 
-<!-- Domain detail modal -->
-<div class="modal-backdrop" id="domain-modal">
+<!-- Company detail modal -->
+<div class="modal-backdrop" id="detail-modal">
   <div class="modal">
     <div class="modal-head">
-      <h2 id="dm-title">Domain</h2>
-      <button class="modal-close" onclick="closeDomainModal()">Close</button>
+      <h2 id="dm-title">Company</h2>
+      <button class="modal-close" onclick="closeDetail()">Close</button>
     </div>
-    <div class="modal-sub" id="dm-sub"></div>
-    <div class="modal-body" id="dm-body"><div class="loading">Loading…</div></div>
+    <div class="modal-body" id="dm-body"></div>
   </div>
 </div>
 
 <!-- New crawl modal -->
 <div class="modal-backdrop" id="crawl-modal">
   <div class="modal" style="max-width:560px">
-    <div class="modal-head">
-      <h2>New Crawl</h2>
-      <button class="modal-close" onclick="closeCrawlModal()">Close</button>
-    </div>
-    <div class="modal-sub">Pick a feature and upload a CSV of domains to crawl. The crawl uses the feature's configured keywords.</div>
-
+    <div class="modal-head"><h2>New Crawl</h2><button class="modal-close" onclick="closeCrawlModal()">Close</button></div>
+    <p style="color:var(--muted);font-size:13px;margin:6px 0 16px">Pick a feature and upload a CSV of company domains. Each site is crawled, then Claude scores how well it fits the feature.</p>
     <div class="crawl-field">
       <label for="crawl-feature">Feature</label>
       <select id="crawl-feature"></select>
     </div>
-
     <div class="crawl-field">
-      <label>Domains CSV</label>
+      <label>Company domains CSV</label>
       <div class="file-drop">
-        <label class="file-btn">
-          Choose CSV
-          <input type="file" id="crawl-csv" accept=".csv,text/csv" hidden />
-        </label>
+        <label class="file-btn">Choose CSV<input type="file" id="crawl-csv" accept=".csv,text/csv" hidden /></label>
         <span class="file-info" id="crawl-file-info">No file selected</span>
       </div>
       <div class="hint">A <code>url</code> or <code>domain</code> column, else the first column. One domain per row (e.g. <code>example.com</code>).</div>
       <div class="domain-preview" id="crawl-preview"></div>
     </div>
-
     <div class="crawl-status" id="crawl-status"></div>
-    <div class="modal-actions" style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
+    <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
       <button class="modal-close" onclick="closeCrawlModal()">Cancel</button>
       <button class="new-crawl-btn" id="crawl-start" onclick="startCrawl()">Start Crawl</button>
     </div>
@@ -447,323 +201,145 @@
 </div>
 
 <script>
-const PALETTE = [
-  '#6c63ff','#00d4aa','#ff6384','#ffcd56','#36a2eb','#ff9f40',
-  '#4bc0c0','#9966ff','#ff6384','#c9cbcf',
-];
+const TIERS = ['strong', 'promising', 'weak', 'unlikely'];
+const TIER_COLORS = { strong: '#22c55e', promising: '#38bdf8', weak: '#f5a623', unlikely: '#ef4444' };
+const TIER_LABELS = { strong: 'Strong (75-100)', promising: 'Promising (50-74)', weak: 'Weak (25-49)', unlikely: 'Unlikely (0-24)' };
 
-function hsl(value, max) {
-  if (value === 0) return 'transparent';
-  const t = Math.min(value / max, 1);
-  const h = 260 - t * 60; // purple → blue-green as intensity rises
-  const s = 60 + t * 30;
-  const l = 20 + t * 35;
-  return `hsl(${h}, ${s}%, ${l}%)`;
-}
-
-// The dashboard is always scoped to one feature (the selected one).
-function featureQuery() {
-  const id = document.getElementById('feature-filter').value;
-  return id ? `?feature_id=${encodeURIComponent(id)}` : '';
-}
-
-// Track live Chart.js instances so we can tear them down before redrawing.
-const charts = {};
-function drawChart(key, canvasId, config) {
-  if (charts[key]) charts[key].destroy();
-  charts[key] = new Chart(document.getElementById(canvasId), config);
-}
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
+function scoreColor(s) { const h = Math.max(0, Math.min(120, (s / 100) * 120)); return `hsl(${h}, 65%, 48%)`; }
+function featureQuery() { const id = document.getElementById('feature-filter').value; return id ? `?feature_id=${encodeURIComponent(id)}` : ''; }
 
 let allFeatures = [];
+let distChart = null;
 
-// Populate the feature selectors (header + crawl modal). No "all" option —
-// the dashboard shows exactly one feature at a time.
 async function loadFeatureOptions() {
   allFeatures = await fetch('/api/features').then(r => r.json());
   const header = document.getElementById('feature-filter');
   const crawlSel = document.getElementById('crawl-feature');
-  header.innerHTML = '';
-  crawlSel.innerHTML = '';
+  header.innerHTML = ''; crawlSel.innerHTML = '';
   if (!allFeatures.length) {
     header.innerHTML = '<option value="">No features</option>';
     crawlSel.innerHTML = '<option value="">No features — add one first</option>';
     return;
   }
   allFeatures.forEach(f => {
-    const o1 = document.createElement('option');
-    o1.value = f.id; o1.textContent = f.name;
-    header.appendChild(o1);
-    const o2 = o1.cloneNode(true);
-    crawlSel.appendChild(o2);
+    const o1 = document.createElement('option'); o1.value = f.id; o1.textContent = f.name;
+    header.appendChild(o1); crawlSel.appendChild(o1.cloneNode(true));
   });
 }
+
+let fitData = [];
 
 async function load() {
   const q = featureQuery();
-  const [summary, keywords, urls, heatmap] = await Promise.all([
+  const [summary, fit] = await Promise.all([
     fetch('/api/summary' + q).then(r => r.json()),
-    fetch('/api/keywords' + q).then(r => r.json()),
-    fetch('/api/urls' + q).then(r => r.json()),
-    fetch('/api/heatmap' + q).then(r => r.json()),
+    fetch('/api/fit' + q).then(r => r.json()),
   ]);
+  fitData = fit;
 
-  // Summary cards
-  document.getElementById('c-domains').textContent = summary.total_domains;
-  document.getElementById('c-pages').textContent = summary.pages_crawled;
-  document.getElementById('c-hits').textContent = summary.total_hits;
-  document.getElementById('c-lastrun').textContent =
-    summary.last_run_at ? new Date(summary.last_run_at).toLocaleString() : 'No runs yet';
+  document.getElementById('c-customers').textContent = summary.customers;
+  document.getElementById('c-strong').textContent = summary.strong;
+  document.getElementById('c-avg').textContent = summary.avg_score == null ? '—' : summary.avg_score;
+  document.getElementById('c-lastrun').textContent = summary.last_run_at ? fmtDate(summary.last_run_at) : 'No runs yet';
 
-  // Keywords chart (horizontal bar, top 20 with hits then top without)
-  const kwTop = keywords.filter(k => k.total > 0).slice(0, 20);
-  if (kwTop.length === 0) {
-    // Show all, even zeros
-    keywords.slice(0, 20).forEach(k => kwTop.push(k));
-  }
-  drawChart('keywords', 'chart-keywords', {
-    type: 'bar',
-    data: {
-      labels: kwTop.map(k => k.keyword),
-      datasets: [{
-        label: 'Total hits',
-        data: kwTop.map(k => k.total),
-        backgroundColor: kwTop.map((_, i) => PALETTE[i % PALETTE.length] + 'cc'),
-        borderColor: kwTop.map((_, i) => PALETTE[i % PALETTE.length]),
-        borderWidth: 1,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: { legend: { display: false }, tooltip: { callbacks: {
-        label: ctx => ` ${ctx.parsed.x} hits`
-      }}},
-      scales: {
-        x: { ticks: { color: '#8891aa' }, grid: { color: '#2e3148' } },
-        y: { ticks: { color: '#e2e8f0', font: { size: 12 } }, grid: { display: false } },
-      },
-    },
-  });
-
-  // URLs chart (top 15)
-  const urlTop = urls.slice(0, 15);
-  const urlLabels = urlTop.map(u => {
-    try { return new URL(u.url).hostname.replace(/^www\./, ''); } catch { return u.url; }
-  });
-  drawChart('urls', 'chart-urls', {
-    type: 'bar',
-    data: {
-      labels: urlLabels,
-      datasets: [{
-        label: 'Total hits',
-        data: urlTop.map(u => u.total),
-        backgroundColor: urlTop.map((_, i) => PALETTE[(i + 3) % PALETTE.length] + 'cc'),
-        borderColor: urlTop.map((_, i) => PALETTE[(i + 3) % PALETTE.length]),
-        borderWidth: 1,
-        borderRadius: 4,
-      }],
-    },
-    options: {
-      indexAxis: 'y',
-      responsive: true,
-      plugins: { legend: { display: false }, tooltip: {
-        callbacks: {
-          title: ctx => urlTop[ctx[0].dataIndex].url,
-          label: ctx => ` ${ctx.parsed.x} hits`,
-        }
-      }},
-      scales: {
-        x: { ticks: { color: '#8891aa' }, grid: { color: '#2e3148' } },
-        y: { ticks: { color: '#e2e8f0', font: { size: 12 } }, grid: { display: false } },
-      },
-    },
-  });
-
-  // Heatmap
-  const { urls: hmUrls, keywords: hmKws, matrix } = heatmap;
-  const container = document.getElementById('heatmap-container');
-  if (!hmUrls.length) {
-    container.innerHTML = '<div class="loading">No keyword hits found yet.</div>';
-  } else {
-    const maxVal = Math.max(...matrix.flat());
-    const table = document.createElement('table');
-    table.className = 'heatmap';
-
-    // Header row
-    const thead = table.createTHead();
-    const hRow = thead.insertRow();
-    const corner = document.createElement('th');
-    corner.textContent = 'URL';
-    hRow.appendChild(corner);
-    hmKws.forEach(kw => {
-      const th = document.createElement('th');
-      th.className = 'col-head';
-      th.textContent = kw;
-      hRow.appendChild(th);
-    });
-
-    // Data rows
-    const tbody = table.createTBody();
-    hmUrls.forEach((url, ri) => {
-      const row = tbody.insertRow();
-      const urlCell = row.insertCell();
-      urlCell.className = 'url-cell';
-      try { urlCell.textContent = new URL(url).hostname.replace(/^www\./, ''); } catch { urlCell.textContent = url; }
-      urlCell.title = url;
-
-      matrix[ri].forEach(val => {
-        const td = row.insertCell();
-        td.className = 'count-cell';
-        td.style.background = hsl(val, maxVal);
-        td.style.color = val > 0 ? '#fff' : 'transparent';
-        td.textContent = val > 0 ? val : '·';
-      });
-    });
-
-    container.innerHTML = '';
-    container.appendChild(table);
-  }
+  renderDistribution(fit);
+  renderFitList(fit);
 }
 
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
-  ));
+function renderDistribution(fit) {
+  const counts = { strong: 0, promising: 0, weak: 0, unlikely: 0 };
+  fit.forEach(f => { if (f.tier && counts[f.tier] != null) counts[f.tier]++; });
+  const data = TIERS.map(t => counts[t]);
+  const total = data.reduce((a, b) => a + b, 0);
+
+  if (distChart) distChart.destroy();
+  distChart = new Chart(document.getElementById('chart-dist'), {
+    type: 'doughnut',
+    data: { labels: TIERS.map(t => TIER_LABELS[t]),
+      datasets: [{ data: total ? data : [1], backgroundColor: total ? TIERS.map(t => TIER_COLORS[t]) : ['#23263a'], borderWidth: 0 }] },
+    options: { cutout: '68%', plugins: { legend: { display: false },
+      tooltip: { enabled: total > 0, callbacks: { label: c => ` ${c.label}: ${c.parsed}` } } } },
+  });
+  document.getElementById('dist-legend').innerHTML = total
+    ? TIERS.map(t => `<div class="row"><span class="dot" style="background:${TIER_COLORS[t]}"></span>${TIER_LABELS[t]}<span class="n">${counts[t]}</span></div>`).join('')
+    : '<div style="color:var(--muted)">No assessments yet.</div>';
 }
 
-function fmtDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
-
-// Crawl coverage table for the selected feature.
-async function loadCoverage() {
-  const domains = await fetch('/api/domains' + featureQuery()).then(r => r.json());
-  const container = document.getElementById('coverage-container');
-  if (!domains.length) {
-    container.innerHTML = '<div class="loading">No pages crawled yet for this feature — start a crawl to populate coverage.</div>';
+function renderFitList(fit) {
+  const c = document.getElementById('fit-container');
+  if (!fit.length) {
+    c.innerHTML = '<div class="empty">No companies assessed yet for this feature — start a crawl to score prospects.</div>';
     return;
   }
-  const maxPages = Math.max(...domains.map(d => d.pages_crawled));
-  const table = document.createElement('table');
-  table.className = 'cov-table';
-  table.innerHTML = `<thead><tr>
-    <th>Domain</th>
-    <th class="num">Pages crawled</th>
-    <th class="num">Total hits</th>
-    <th>Last crawled</th>
-  </tr></thead>`;
-  const tbody = table.createTBody();
-  domains.forEach(d => {
-    const tr = tbody.insertRow();
-    tr.title = 'Click to see crawled pages';
-    const pct = maxPages ? (d.pages_crawled / maxPages) * 100 : 0;
-    const failed = d.pages_crawled - d.pages_ok;
-    const notes = [
-      failed ? `<span class="status-err">${failed} failed</span>` : '',
-      d.pages_robots ? `<span class="robots-note">${d.pages_robots} robots</span>` : '',
-    ].filter(Boolean).join(', ');
-    tr.innerHTML = `
-      <td><span class="cov-domain">${esc(d.domain)}</span></td>
-      <td class="num">
-        <div class="cov-bar-wrap" style="justify-content:flex-end">
-          <span>${d.pages_crawled}${notes ? ` (${notes})` : ''}</span>
-          <span class="cov-bar" style="width:${Math.max(pct, 4)}px"></span>
-        </div>
-      </td>
-      <td class="num">${d.total_hits}</td>
-      <td>${fmtDate(d.last_crawled)}</td>`;
-    tr.onclick = () => openDomainModal(d.domain);
+  const list = document.createElement('div'); list.className = 'fit-list';
+  fit.forEach((f, i) => {
+    const row = document.createElement('div'); row.className = 'fit-row';
+    const scored = f.fit_score != null;
+    const pages = f.pages_analyzed != null ? `${f.pages_analyzed} pages` : '';
+    const barColor = scored ? scoreColor(f.fit_score) : 'var(--muted)';
+    const tierCls = f.error ? 'pending' : (f.tier || 'pending');
+    const tierLabel = f.error ? 'error' : (f.tier || 'pending');
+    row.innerHTML = `
+      <div class="fit-domain">${esc(f.domain)}<span class="meta">${esc(pages)}</span></div>
+      <div class="fit-bar-wrap">
+        <div class="fit-bar-track"><div class="fit-bar" style="width:${scored ? f.fit_score : 0}%;background:${barColor}"></div></div>
+        <span class="fit-score">${scored ? f.fit_score : '—'}</span>
+      </div>
+      <span class="tier ${tierCls}">${esc(tierLabel)}</span>`;
+    row.onclick = () => openDetail(i);
+    list.appendChild(row);
   });
-  container.innerHTML = '';
-  container.appendChild(table);
-  const caption = document.createElement('div');
-  caption.className = 'cov-caption';
-  caption.textContent = 'Coverage counts pages crawled for the selected feature. Click a domain to see its pages.';
-  container.appendChild(caption);
+  c.innerHTML = ''; c.appendChild(list);
 }
 
-// Domain detail modal: pages grouped by host (subdomain).
-async function openDomainModal(domain) {
-  document.getElementById('dm-title').textContent = domain;
-  document.getElementById('dm-sub').textContent = '';
-  document.getElementById('dm-body').innerHTML = '<div class="loading">Loading…</div>';
-  document.getElementById('domain-modal').classList.add('open');
-
-  const fq = featureQuery();
-  const pages = await fetch(`/api/domains/${encodeURIComponent(domain)}/pages${fq}`).then(r => r.json());
-  const body = document.getElementById('dm-body');
-  if (!pages.length) {
-    body.innerHTML = '<div class="loading">No pages recorded for this domain.</div>';
-    return;
+async function openDetail(i) {
+  const f = fitData[i];
+  document.getElementById('dm-title').textContent = f.domain;
+  const scored = f.fit_score != null;
+  const signals = Array.isArray(f.signals) ? f.signals : [];
+  let html = '';
+  if (f.error) {
+    html += `<p class="err">Assessment failed: ${esc(f.error)}</p>`;
   }
+  if (scored) {
+    html += `<div class="score-head">
+      <div class="score-big" style="color:${scoreColor(f.fit_score)}">${f.fit_score}<span style="font-size:18px;color:var(--muted)">/100</span></div>
+      <span class="tier ${esc(f.tier)}">${esc(f.tier)}</span>
+    </div>`;
+  }
+  if (f.summary) html += `<div class="subhead">Summary</div><p class="assess-summary">${esc(f.summary)}</p>`;
+  if (signals.length) html += `<div class="subhead">Signals</div><ul class="signals">${signals.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
+  if (f.recommendation) html += `<div class="subhead">Recommendation</div><div class="reco">${esc(f.recommendation)}</div>`;
+  html += `<div class="subhead">Crawl coverage</div><div id="dm-pages"><span style="color:var(--muted);font-size:13px">Loading pages…</span></div>`;
+  if (f.model) html += `<p style="color:var(--muted);font-size:11px;margin-top:16px">Assessed by ${esc(f.model)} · ${fmtDate(f.assessed_at)}</p>`;
+  document.getElementById('dm-body').innerHTML = html;
+  document.getElementById('detail-modal').classList.add('open');
 
-  // Group by host so subdomains are visually separated.
-  const groups = {};
-  pages.forEach(p => {
-    let host = p.url;
-    try { host = new URL(p.url).host; } catch {}
-    (groups[host] ||= []).push(p);
-  });
-
-  const totalHits = pages.reduce((s, p) => s + Number(p.hits || 0), 0);
-  const nHosts = Object.keys(groups).length;
-  const nRobots = pages.filter(p => p.blocked_reason === 'robots-disallowed').length;
-  const nCf = pages.filter(p => p.blocked_reason && p.blocked_reason !== 'robots-disallowed').length;
-  document.getElementById('dm-sub').textContent =
-    `${pages.length} page${pages.length === 1 ? '' : 's'} across ${nHosts} host${nHosts === 1 ? '' : 's'}`
-    + ` · ${totalHits} total hits`
-    + (nCf ? ` · ${nCf} Cloudflare-blocked` : '')
-    + (nRobots ? ` · ${nRobots} skipped by robots.txt` : '');
-
-  body.innerHTML = '';
-  Object.keys(groups).sort().forEach(host => {
-    const wrap = document.createElement('div');
-    wrap.className = 'host-group';
-    const rows = groups[host].map(p => {
-      let path = p.url;
-      try { const u = new URL(p.url); path = (u.pathname || '/') + u.search; } catch {}
-      let status;
-      if (p.blocked_reason === 'robots-disallowed') {
-        status = `<span class="robots-badge" title="Skipped — disallowed by robots.txt">Blocked by robots.txt</span>`;
-      } else if (p.blocked_reason) {
-        status = `<span class="cf-badge" title="Cloudflare 403: ${esc(p.blocked_reason)}">403 · Cloudflare (${esc(p.blocked_reason)})</span>`;
-      } else if (p.ok) {
-        status = `<span class="status-ok">${p.status_code || 'ok'}</span>`;
-      } else {
-        status = `<span class="status-err">${p.status_code || 'error'}</span>`;
-      }
-      return `<tr>
-        <td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(path)}</a></td>
-        <td class="num">${p.hits}</td>
-        <td>${status}</td>
-        <td>${fmtDate(p.crawled_at)}</td>
-      </tr>`;
-    }).join('');
-    wrap.innerHTML = `
-      <div class="host-title">${esc(host)}</div>
-      <table class="pages">
-        <thead><tr><th>Path</th><th class="num">Hits</th><th>Status</th><th>Crawled</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table>`;
-    body.appendChild(wrap);
-  });
+  const pages = await fetch(`/api/domains/${encodeURIComponent(f.domain)}/pages${featureQuery()}`).then(r => r.json());
+  const pc = document.getElementById('dm-pages');
+  if (!pc) return;
+  if (!pages.length) { pc.innerHTML = '<span style="color:var(--muted);font-size:13px">No pages recorded.</span>'; return; }
+  const rows = pages.map(p => {
+    let path = p.url; try { const u = new URL(p.url); path = (u.pathname || '/') + u.search; } catch {}
+    let status;
+    if (p.blocked_reason === 'robots-disallowed') status = '<span class="robots-badge">robots.txt</span>';
+    else if (p.blocked_reason) status = `<span class="status-err">403 (${esc(p.blocked_reason)})</span>`;
+    else if (p.ok) status = `<span class="status-ok">${p.status_code || 'ok'}</span>`;
+    else status = `<span class="status-err">${p.status_code || 'error'}</span>`;
+    return `<tr><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(path)}</a></td><td>${status}</td></tr>`;
+  }).join('');
+  pc.innerHTML = `<details open><summary>${pages.length} page${pages.length === 1 ? '' : 's'} crawled</summary>
+    <table class="pages"><thead><tr><th>Path</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
-function closeDomainModal() {
-  document.getElementById('domain-modal').classList.remove('open');
-}
-document.getElementById('domain-modal').addEventListener('click', e => {
-  if (e.target.id === 'domain-modal') closeDomainModal();
-});
+function closeDetail() { document.getElementById('detail-modal').classList.remove('open'); }
+document.getElementById('detail-modal').addEventListener('click', e => { if (e.target.id === 'detail-modal') closeDetail(); });
 
 // ---- New crawl modal ----
 let crawlDomains = [];
-
-function setCrawlStatus(msg, kind) {
-  const el = document.getElementById('crawl-status');
-  el.textContent = msg || '';
-  el.className = 'crawl-status' + (kind ? ' ' + kind : '');
-}
-
+function setCrawlStatus(msg, kind) { const el = document.getElementById('crawl-status'); el.textContent = msg || ''; el.className = 'crawl-status' + (kind ? ' ' + kind : ''); }
 function openCrawlModal() {
   if (!allFeatures.length) return;
   crawlDomains = [];
@@ -771,123 +347,64 @@ function openCrawlModal() {
   document.getElementById('crawl-file-info').textContent = 'No file selected';
   document.getElementById('crawl-preview').classList.remove('show');
   document.getElementById('crawl-preview').innerHTML = '';
-  setCrawlStatus('');
-  document.getElementById('crawl-start').disabled = false;
-  // Default the crawl feature to whatever the dashboard is showing.
+  setCrawlStatus(''); document.getElementById('crawl-start').disabled = false;
   document.getElementById('crawl-feature').value = document.getElementById('feature-filter').value;
   document.getElementById('crawl-modal').classList.add('open');
 }
-function closeCrawlModal() {
-  document.getElementById('crawl-modal').classList.remove('open');
-}
-document.getElementById('crawl-modal').addEventListener('click', e => {
-  if (e.target.id === 'crawl-modal') closeCrawlModal();
-});
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeDomainModal(); closeCrawlModal(); }
-});
+function closeCrawlModal() { document.getElementById('crawl-modal').classList.remove('open'); }
+document.getElementById('crawl-modal').addEventListener('click', e => { if (e.target.id === 'crawl-modal') closeCrawlModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeDetail(); closeCrawlModal(); } });
 
 function parseCsvLine(line) {
   const out = []; let cur = '', q = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (q) {
-      if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
-      else cur += c;
-    } else if (c === '"') q = true;
-    else if (c === ',') { out.push(cur); cur = ''; }
-    else cur += c;
-  }
-  out.push(cur);
-  return out.map(f => f.trim());
+  for (let i = 0; i < line.length; i++) { const c = line[i];
+    if (q) { if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += c; }
+    else if (c === '"') q = true; else if (c === ',') { out.push(cur); cur = ''; } else cur += c; }
+  out.push(cur); return out.map(f => f.trim());
 }
-
-// Extract domains: use a url/domain column if the header has one, else col 0.
 function parseDomainsCsv(text) {
   const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
   if (!lines.length) return [];
   const header = parseCsvLine(lines[0]).map(h => h.toLowerCase());
-  let col = header.indexOf('url');
-  if (col === -1) col = header.indexOf('domain');
-  const hasHeader = col !== -1;
-  if (!hasHeader) col = 0;
+  let col = header.indexOf('url'); if (col === -1) col = header.indexOf('domain');
+  const hasHeader = col !== -1; if (!hasHeader) col = 0;
   const rows = hasHeader ? lines.slice(1) : lines;
   const seen = new Set(), out = [];
-  rows.forEach(line => {
-    const v = (parseCsvLine(line)[col] || '').trim();
-    const key = v.toLowerCase();
-    if (v && !seen.has(key)) { seen.add(key); out.push(v); }
-  });
+  rows.forEach(line => { const v = (parseCsvLine(line)[col] || '').trim(); const key = v.toLowerCase();
+    if (v && !seen.has(key)) { seen.add(key); out.push(v); } });
   return out;
 }
-
 document.getElementById('crawl-csv').addEventListener('change', ev => {
-  const file = ev.target.files && ev.target.files[0];
-  if (!file) return;
+  const file = ev.target.files && ev.target.files[0]; if (!file) return;
   const reader = new FileReader();
   reader.onload = () => {
     try {
       crawlDomains = parseDomainsCsv(String(reader.result));
       const preview = document.getElementById('crawl-preview');
-      document.getElementById('crawl-file-info').textContent =
-        `${file.name} — ${crawlDomains.length} domain${crawlDomains.length === 1 ? '' : 's'}`;
-      if (crawlDomains.length) {
-        preview.innerHTML = crawlDomains.map(d => esc(d)).join('<br>');
-        preview.classList.add('show');
-        setCrawlStatus('');
-      } else {
-        preview.classList.remove('show');
-        setCrawlStatus('No domains found in that file.', 'err');
-      }
-    } catch (err) {
-      console.error(err);
-      setCrawlStatus('Could not read that file.', 'err');
-    }
+      document.getElementById('crawl-file-info').textContent = `${file.name} — ${crawlDomains.length} domain${crawlDomains.length === 1 ? '' : 's'}`;
+      if (crawlDomains.length) { preview.innerHTML = crawlDomains.map(d => esc(d)).join('<br>'); preview.classList.add('show'); setCrawlStatus(''); }
+      else { preview.classList.remove('show'); setCrawlStatus('No domains found in that file.', 'err'); }
+    } catch (err) { console.error(err); setCrawlStatus('Could not read that file.', 'err'); }
   };
   reader.readAsText(file);
 });
-
 async function startCrawl() {
   const featureId = document.getElementById('crawl-feature').value;
   if (!featureId) { setCrawlStatus('Select a feature.', 'err'); return; }
   if (!crawlDomains.length) { setCrawlStatus('Upload a CSV of domains first.', 'err'); return; }
-
-  const btn = document.getElementById('crawl-start');
-  btn.disabled = true;
-  setCrawlStatus('Starting crawl…');
+  const btn = document.getElementById('crawl-start'); btn.disabled = true; setCrawlStatus('Starting crawl…');
   try {
-    const res = await fetch('/api/crawl', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feature_id: Number(featureId), domains: crawlDomains }),
-    });
+    const res = await fetch('/api/crawl', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feature_id: Number(featureId), domains: crawlDomains }) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setCrawlStatus(data.error || 'Failed to start crawl.', 'err');
-      btn.disabled = false;
-      return;
-    }
-    setCrawlStatus(
-      `Crawl started for “${data.feature}” over ${data.domains} domain${data.domains === 1 ? '' : 's'}. `
-      + `Results will appear here as pages are crawled — refresh in a bit.`, 'ok');
-  } catch (err) {
-    console.error(err);
-    setCrawlStatus('Failed to start crawl.', 'err');
-    btn.disabled = false;
-  }
+    if (!res.ok) { setCrawlStatus(data.error || 'Failed to start crawl.', 'err'); btn.disabled = false; return; }
+    setCrawlStatus(`Crawl started for “${data.feature}” over ${data.domains} compan${data.domains === 1 ? 'y' : 'ies'}. `
+      + `Fit scores will appear here as sites are assessed — refresh in a bit.`, 'ok');
+  } catch (err) { console.error(err); setCrawlStatus('Failed to start crawl.', 'err'); btn.disabled = false; }
 }
 
-// Reload everything for the currently selected feature.
-function reloadAll() {
-  load().catch(err => console.error('Dashboard reload error:', err));
-  loadCoverage().catch(err => console.error('Coverage load error:', err));
-}
-
-document.getElementById('feature-filter').addEventListener('change', reloadAll);
-
-loadFeatureOptions()
-  .then(reloadAll)
-  .catch(err => console.error('Dashboard load error:', err));
+document.getElementById('feature-filter').addEventListener('change', () => load().catch(e => console.error(e)));
+loadFeatureOptions().then(() => load()).catch(err => console.error('Dashboard load error:', err));
 </script>
 </body>
 </html>

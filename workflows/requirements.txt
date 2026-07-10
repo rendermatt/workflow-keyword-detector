@@ -2,3 +2,4 @@ render_sdk
 requests
 beautifulsoup4
 psycopg2-binary
+anthropic

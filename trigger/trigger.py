@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Trigger a crawl for a feature over a list of domains (CLI equivalent of the
-dashboard's "New Crawl"). Crawls use the feature's keywords from the database.
+Trigger a crawl + fit assessment for a feature over a list of domains (CLI
+equivalent of the dashboard's "New Crawl"). Each site is crawled and scored by
+the LLM against the feature's documentation.
 
 Usage:
     python trigger.py --feature-id 1 --domains-csv domains.csv

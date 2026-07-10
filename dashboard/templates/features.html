@@ -3,234 +3,82 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Features · Keyword Scraper</title>
+  <title>Features · Fit Detector</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --bg: #0f1117;
-      --surface: #1a1d27;
-      --surface2: #23263a;
-      --border: #2e3148;
-      --accent: #6c63ff;
-      --accent2: #00d4aa;
-      --danger: #ff6384;
-      --text: #e2e8f0;
-      --muted: #8891aa;
-    }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    header {
-      background: var(--surface);
-      border-bottom: 1px solid var(--border);
-      padding: 16px 32px;
-      display: flex;
-      align-items: center;
-      gap: 20px;
-    }
+    :root { --bg: #0f1117; --surface: #1a1d27; --surface2: #23263a; --border: #2e3148;
+      --accent: #6c63ff; --accent2: #00d4aa; --danger: #ef4444; --text: #e2e8f0; --muted: #8891aa; }
+    body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
+    header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 20px; }
     header .brand { display: flex; align-items: center; gap: 12px; }
     header h1 { font-size: 18px; font-weight: 600; }
     nav { display: flex; gap: 4px; margin-left: 12px; }
-    nav a {
-      color: var(--muted);
-      text-decoration: none;
-      font-size: 13px;
-      padding: 6px 12px;
-      border-radius: 8px;
-    }
-    nav a:hover { color: var(--text); background: var(--surface2); }
-    nav a.active { color: var(--text); background: var(--surface2); }
-
-    .container { max-width: 1200px; margin: 0 auto; padding: 24px 32px; }
-
-    .toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 24px;
-      gap: 16px;
-    }
+    nav a { color: var(--muted); text-decoration: none; font-size: 13px; padding: 6px 12px; border-radius: 8px; }
+    nav a:hover, nav a.active { color: var(--text); background: var(--surface2); }
+    .container { max-width: 1100px; margin: 0 auto; padding: 24px 32px; }
+    .toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; gap: 16px; }
     .toolbar .lead { color: var(--muted); font-size: 13px; }
     .toolbar .lead strong { color: var(--text); font-weight: 600; }
-
-    button {
-      font-family: inherit;
-      font-size: 13px;
-      cursor: pointer;
-      border-radius: 8px;
-      border: 1px solid transparent;
-      padding: 8px 14px;
-      transition: background .12s, border-color .12s;
-    }
-    .btn-primary { background: var(--accent); color: #fff; }
-    .btn-primary:hover { background: #5a52e0; }
-    .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); }
-    .btn-ghost:hover { background: var(--surface2); }
-    .btn-danger { background: transparent; border-color: var(--border); color: var(--danger); }
-    .btn-danger:hover { background: rgba(255,99,132,.12); border-color: var(--danger); }
-
-    /* Feature cards */
-    .features {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-      gap: 18px;
-    }
-    .feature-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 20px 22px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-    .fc-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    button { font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 8px; border: 1px solid transparent; padding: 8px 14px; }
+    .btn-primary { background: var(--accent); color: #fff; } .btn-primary:hover { background: #5a52e0; }
+    .btn-ghost { background: transparent; border-color: var(--border); color: var(--text); } .btn-ghost:hover { background: var(--surface2); }
+    .btn-danger { background: transparent; border-color: var(--border); color: var(--danger); } .btn-danger:hover { background: rgba(239,68,68,.12); border-color: var(--danger); }
+    .features { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 18px; }
+    .feature-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px; }
     .fc-name { font-size: 16px; font-weight: 600; }
-    .fc-count {
-      font-size: 11px;
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 99px;
-      padding: 2px 10px;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-    .fc-doc a {
-      color: var(--accent2);
-      text-decoration: none;
-      font-size: 13px;
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      word-break: break-all;
-    }
+    .fc-doc a { color: var(--accent2); text-decoration: none; font-size: 13px; display: inline-flex; align-items: center; gap: 5px; word-break: break-all; }
     .fc-doc a:hover { text-decoration: underline; }
-    .fc-doc .none { color: var(--muted); font-size: 13px; font-style: italic; }
-
-    .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-    .chip {
-      background: var(--surface2);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 3px 9px;
-      font-size: 12px;
-      color: var(--text);
-    }
-    .chip.more { color: var(--muted); }
-    .chips-empty { color: var(--muted); font-size: 13px; font-style: italic; }
-
+    .fc-doc .none { color: var(--danger); font-size: 13px; font-style: italic; }
     .fc-actions { display: flex; gap: 8px; margin-top: 2px; }
-
-    .empty-state {
-      text-align: center;
-      color: var(--muted);
-      padding: 60px 20px;
-      border: 1px dashed var(--border);
-      border-radius: 12px;
-    }
+    .empty-state { text-align: center; color: var(--muted); padding: 60px 20px; border: 1px dashed var(--border); border-radius: 12px; }
     .empty-state h2 { color: var(--text); font-size: 16px; margin-bottom: 8px; }
-
-    /* Modal */
-    .modal-backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgba(0,0,0,.6);
-      display: none;
-      align-items: flex-start;
-      justify-content: center;
-      padding: 60px 20px;
-      overflow-y: auto;
-      z-index: 50;
-    }
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: none; align-items: flex-start; justify-content: center; padding: 60px 20px; overflow-y: auto; z-index: 50; }
     .modal-backdrop.open { display: flex; }
-    .modal {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      width: 100%;
-      max-width: 560px;
-      padding: 24px 26px;
-    }
+    .modal { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 520px; padding: 24px 26px; }
     .modal h2 { font-size: 17px; margin-bottom: 18px; }
     .field { margin-bottom: 18px; }
     .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
     .field .hint { font-size: 12px; color: var(--muted); margin-top: 5px; }
-    .field .hint code, .csv-status code {
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 4px; padding: 0 4px; font-size: 11px;
-    }
-    .kw-label-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
-    .kw-label-row label { margin-bottom: 0; }
-    .csv-btn {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-size: 12px; text-transform: none; letter-spacing: 0;
-      color: var(--text); cursor: pointer;
-      background: var(--surface2); border: 1px solid var(--border);
-      border-radius: 8px; padding: 5px 12px;
-    }
-    .csv-btn:hover { border-color: var(--accent); }
-    .csv-status { font-size: 12px; margin-top: 6px; min-height: 1em; }
-    .csv-status.ok { color: var(--accent2); }
-    .csv-status.err { color: var(--danger); }
-    input[type="text"], input[type="url"], textarea {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      color: var(--text);
-      font-family: inherit;
-      font-size: 14px;
-      padding: 9px 12px;
-    }
+    input[type="text"], input[type="url"] { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 14px; padding: 9px 12px; }
     input:focus, textarea:focus { outline: none; border-color: var(--accent); }
-    textarea { resize: vertical; min-height: 96px; }
-    .kw-preview { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    textarea { width: 100%; min-height: 220px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+      color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.55; padding: 12px; resize: vertical; }
+    .label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+    .label-row label { margin-bottom: 0; }
+    .link-btn { background: none; border: none; padding: 0; color: var(--accent2); font-size: 12px; cursor: pointer; text-transform: none; letter-spacing: 0; }
+    .link-btn:hover { text-decoration: underline; }
+    .placeholders { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
+    .ph { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; color: var(--accent2); }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
     .modal-error { color: var(--danger); font-size: 13px; margin-bottom: 14px; display: none; }
     .modal-error.show { display: block; }
-
     .loading { color: var(--muted); text-align: center; padding: 40px; }
   </style>
 </head>
 <body>
-
 <header>
   <div class="brand">
-    <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-      <path stroke-linecap="round" stroke-linejoin="round"
-        d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-    </svg>
-    <h1>Keyword Scraper</h1>
+    <svg width="22" height="22" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+    <h1>Fit Detector</h1>
   </div>
   <nav>
     <a href="/">Dashboard</a>
     <a href="/features" class="active">Features</a>
+    <a href="/prompt">Prompt</a>
     <a href="/docs">Docs</a>
   </nav>
 </header>
-
 <div class="container">
   <div class="toolbar">
-    <div class="lead">
-      Features are the things we look for on a prospect's site to identify a potential user.
-      Each bundles a <strong>documentation link</strong> and a set of <strong>keywords</strong>.
-    </div>
+    <div class="lead">A feature is the product capability you're scoring prospects against. Each one needs a <strong>documentation link</strong> — the LLM reads it to understand what the feature does before judging fit.</div>
     <button class="btn-primary" onclick="openModal()">+ Add Feature</button>
   </div>
-
   <div id="list"><div class="loading">Loading…</div></div>
 </div>
 
-<!-- Add / Edit modal -->
 <div class="modal-backdrop" id="modal-backdrop">
-  <div class="modal">
+  <div class="modal" style="max-width:640px">
     <h2 id="modal-title">Add Feature</h2>
     <div class="modal-error" id="modal-error"></div>
     <form id="feature-form" onsubmit="return false;">
@@ -242,19 +90,19 @@
       <div class="field">
         <label for="f-doc">Documentation URL</label>
         <input type="url" id="f-doc" placeholder="https://render.com/docs/…" autocomplete="off" />
+        <div class="hint">Required. This page is fetched and given to the LLM as the definition of the feature.</div>
       </div>
       <div class="field">
-        <div class="kw-label-row">
-          <label for="f-keywords">Keywords</label>
-          <label class="csv-btn">
-            Load CSV
-            <input type="file" id="f-csv" accept=".csv,text/csv" hidden />
-          </label>
+        <div class="label-row">
+          <label for="f-prompt">Assessment prompt</label>
+          <button type="button" class="link-btn" onclick="loadDefaultPrompt()">Reset to default</button>
         </div>
-        <textarea id="f-keywords" placeholder="Separate with commas or new lines&#10;e.g. background job, task queue, cron job"></textarea>
-        <div class="hint">Separate keywords with commas or new lines, or load a CSV (a <code>keyword</code> column, else the first column). Duplicates are removed automatically.</div>
-        <div class="csv-status" id="csv-status"></div>
-        <div class="kw-preview" id="kw-preview"></div>
+        <textarea id="f-prompt" placeholder="How Claude should judge fit for this feature…"></textarea>
+        <div class="hint">This feature's own prompt — Claude runs it against every company you crawl for it. Keep the placeholders below; they're filled in per company.</div>
+        <div class="placeholders">{% raw %}
+          <span class="ph">{{FEATURE_NAME}}</span><span class="ph">{{FEATURE_DOCUMENTATION}}</span>
+          <span class="ph">{{CUSTOMER_DOMAIN}}</span><span class="ph">{{CRAWLED_CONTENT}}</span>
+        {% endraw %}</div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
@@ -266,233 +114,76 @@
 
 <script>
 let features = [];
+let defaultPrompt = '';
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function parseKeywords(raw) {
-  const seen = new Set(), out = [];
-  raw.split(/[\n,]/).forEach(k => {
-    const t = k.trim();
-    if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); }
-  });
-  return out;
+async function loadFeatures() { features = await fetch('/api/features').then(r => r.json()); render(); }
+async function loadDefault() {
+  // The global default (app_settings) new features start from and "reset" loads.
+  const d = await fetch('/api/settings/prompt').then(r => r.json());
+  defaultPrompt = d.prompt || '';
 }
-
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
-  ));
-}
-
-async function loadFeatures() {
-  const res = await fetch('/api/features');
-  features = await res.json();
-  render();
-}
-
+function loadDefaultPrompt() { document.getElementById('f-prompt').value = defaultPrompt; }
 function render() {
   const list = document.getElementById('list');
   if (!features.length) {
-    list.innerHTML = `
-      <div class="empty-state">
-        <h2>No features yet</h2>
-        <p>Add your first feature to start tracking the signals that identify potential users.</p>
-      </div>`;
+    list.innerHTML = `<div class="empty-state"><h2>No features yet</h2><p>Add your first feature to start scoring prospects for fit.</p></div>`;
     return;
   }
-  const grid = document.createElement('div');
-  grid.className = 'features';
+  const grid = document.createElement('div'); grid.className = 'features';
   features.forEach(f => {
-    const kws = f.keywords || [];
-    const shown = kws.slice(0, 12);
-    const rest = kws.length - shown.length;
-    const chips = shown.map(k => `<span class="chip">${esc(k)}</span>`).join('')
-      + (rest > 0 ? `<span class="chip more">+${rest} more</span>` : '');
     const doc = f.documentation_url
       ? `<a href="${esc(f.documentation_url)}" target="_blank" rel="noopener">
-           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-             <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
-           </svg>${esc(f.documentation_url)}</a>`
-      : `<span class="none">No documentation link</span>`;
-
-    const card = document.createElement('div');
-    card.className = 'feature-card';
-    card.innerHTML = `
-      <div class="fc-head">
-        <div class="fc-name">${esc(f.name)}</div>
-        <div class="fc-count">${kws.length} keyword${kws.length === 1 ? '' : 's'}</div>
-      </div>
-      <div class="fc-doc">${doc}</div>
-      <div class="chips">${chips || '<span class="chips-empty">No keywords yet</span>'}</div>
-      <div class="fc-actions">
-        <button class="btn-ghost" data-edit="${f.id}">Edit</button>
-        <button class="btn-danger" data-del="${f.id}">Delete</button>
-      </div>`;
+           <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>${esc(f.documentation_url)}</a>`
+      : `<span class="none">No documentation link — required for scoring</span>`;
+    const card = document.createElement('div'); card.className = 'feature-card';
+    card.innerHTML = `<div class="fc-name">${esc(f.name)}</div><div class="fc-doc">${doc}</div>
+      <div class="fc-actions"><button class="btn-ghost" data-edit="${f.id}">Edit</button><button class="btn-danger" data-del="${f.id}">Delete</button></div>`;
     grid.appendChild(card);
   });
-  list.innerHTML = '';
-  list.appendChild(grid);
-
-  grid.querySelectorAll('[data-edit]').forEach(b =>
-    b.onclick = () => openModal(+b.dataset.edit));
-  grid.querySelectorAll('[data-del]').forEach(b =>
-    b.onclick = () => del(+b.dataset.del));
+  list.innerHTML = ''; list.appendChild(grid);
+  grid.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openModal(+b.dataset.edit));
+  grid.querySelectorAll('[data-del]').forEach(b => b.onclick = () => del(+b.dataset.del));
 }
-
-function showError(msg) {
-  const el = document.getElementById('modal-error');
-  el.textContent = msg;
-  el.classList.toggle('show', !!msg);
-}
-
+function showError(msg) { const el = document.getElementById('modal-error'); el.textContent = msg; el.classList.toggle('show', !!msg); }
 function openModal(id) {
   showError('');
-  setCsvStatus('');
   const f = id ? features.find(x => x.id === id) : null;
   document.getElementById('modal-title').textContent = f ? 'Edit Feature' : 'Add Feature';
   document.getElementById('f-id').value = f ? f.id : '';
   document.getElementById('f-name').value = f ? f.name : '';
   document.getElementById('f-doc').value = f && f.documentation_url ? f.documentation_url : '';
-  document.getElementById('f-keywords').value = f ? (f.keywords || []).join(', ') : '';
-  updatePreview();
+  document.getElementById('f-prompt').value = f && f.fit_prompt ? f.fit_prompt : defaultPrompt;
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('f-name').focus();
 }
-
-function closeModal() {
-  document.getElementById('modal-backdrop').classList.remove('open');
-}
-
-function updatePreview() {
-  const kws = parseKeywords(document.getElementById('f-keywords').value);
-  document.getElementById('kw-preview').innerHTML =
-    kws.map(k => `<span class="chip">${esc(k)}</span>`).join('');
-}
-document.getElementById('f-keywords').addEventListener('input', updatePreview);
-
-function setCsvStatus(msg, kind) {
-  const el = document.getElementById('csv-status');
-  el.textContent = msg || '';
-  el.className = 'csv-status' + (kind ? ' ' + kind : '');
-}
-
-// Split one CSV line into fields, honoring double-quoted values ("" escapes ").
-function parseCsvLine(line) {
-  const fields = [];
-  let cur = '', inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i];
-    if (inQuotes) {
-      if (c === '"') {
-        if (line[i + 1] === '"') { cur += '"'; i++; }
-        else inQuotes = false;
-      } else cur += c;
-    } else if (c === '"') {
-      inQuotes = true;
-    } else if (c === ',') {
-      fields.push(cur); cur = '';
-    } else cur += c;
-  }
-  fields.push(cur);
-  return fields.map(f => f.trim());
-}
-
-// Extract keywords from CSV text: use a "keyword" column if a header has one,
-// otherwise treat the first column of every row as the keyword.
-function parseCsvKeywords(text) {
-  const lines = text.split(/\r\n|\r|\n/).filter(l => l.trim() !== '');
-  if (!lines.length) return [];
-  const header = parseCsvLine(lines[0]).map(h => h.toLowerCase());
-  const kwIndex = header.indexOf('keyword');
-  const hasHeader = kwIndex !== -1;
-  const col = hasHeader ? kwIndex : 0;
-  const rows = hasHeader ? lines.slice(1) : lines;
-  const out = [];
-  rows.forEach(line => {
-    const fields = parseCsvLine(line);
-    const value = (fields[col] || '').trim();
-    if (value) out.push(value);
-  });
-  return out;
-}
-
-document.getElementById('f-csv').addEventListener('change', ev => {
-  const file = ev.target.files && ev.target.files[0];
-  ev.target.value = '';  // allow re-selecting the same file
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const parsed = parseCsvKeywords(String(reader.result));
-      if (!parsed.length) {
-        setCsvStatus('No keywords found in that file.', 'err');
-        return;
-      }
-      const ta = document.getElementById('f-keywords');
-      const before = parseKeywords(ta.value).length;
-      const merged = parseKeywords(ta.value + '\n' + parsed.join('\n'));
-      ta.value = merged.join(', ');
-      updatePreview();
-      const added = merged.length - before;
-      setCsvStatus(
-        `Loaded ${parsed.length} from “${file.name}” — added ${added} new (${merged.length} total).`,
-        'ok'
-      );
-    } catch (err) {
-      console.error(err);
-      setCsvStatus('Could not read that file.', 'err');
-    }
-  };
-  reader.onerror = () => setCsvStatus('Could not read that file.', 'err');
-  reader.readAsText(file);
-});
-
+function closeModal() { document.getElementById('modal-backdrop').classList.remove('open'); }
 async function save() {
   const id = document.getElementById('f-id').value;
   const payload = {
     name: document.getElementById('f-name').value.trim(),
     documentation_url: document.getElementById('f-doc').value.trim(),
-    keywords: parseKeywords(document.getElementById('f-keywords').value),
+    fit_prompt: document.getElementById('f-prompt').value.trim(),
   };
   if (!payload.name) { showError('Name is required.'); return; }
-
-  const btn = document.getElementById('save-btn');
-  btn.disabled = true;
+  if (!payload.documentation_url) { showError('A documentation URL is required.'); return; }
+  const btn = document.getElementById('save-btn'); btn.disabled = true;
   try {
-    const res = await fetch(id ? `/api/features/${id}` : '/api/features', {
-      method: id ? 'PUT' : 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      showError(err.error || 'Something went wrong.');
-      return;
-    }
-    closeModal();
-    await loadFeatures();
-  } finally {
-    btn.disabled = false;
-  }
+    const res = await fetch(id ? `/api/features/${id}` : '/api/features', { method: id ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    if (!res.ok) { const err = await res.json().catch(() => ({})); showError(err.error || 'Something went wrong.'); return; }
+    closeModal(); await loadFeatures();
+  } finally { btn.disabled = false; }
 }
-
 async function del(id) {
   const f = features.find(x => x.id === id);
-  if (!confirm(`Delete “${f ? f.name : 'this feature'}” and all its keywords?`)) return;
+  if (!confirm(`Delete “${f ? f.name : 'this feature'}”? Its fit assessments and crawl data are removed too.`)) return;
   const res = await fetch(`/api/features/${id}`, { method: 'DELETE' });
-  if (res.ok) await loadFeatures();
-  else alert('Failed to delete feature.');
+  if (res.ok) await loadFeatures(); else alert('Failed to delete feature.');
 }
-
-// Close modal on backdrop click / Escape
-document.getElementById('modal-backdrop').addEventListener('click', e => {
-  if (e.target.id === 'modal-backdrop') closeModal();
-});
+document.getElementById('modal-backdrop').addEventListener('click', e => { if (e.target.id === 'modal-backdrop') closeModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
-
-loadFeatures().catch(err => {
-  console.error(err);
-  document.getElementById('list').innerHTML =
-    '<div class="empty-state"><h2>Couldn\'t load features</h2><p>Check the server logs.</p></div>';
-});
+Promise.all([loadFeatures(), loadDefault()]).catch(err => { console.error(err); document.getElementById('list').innerHTML = '<div class="empty-state"><h2>Couldn\'t load features</h2><p>Check the server logs.</p></div>'; });
 </script>
 </body>
 </html>
