@@ -50,6 +50,7 @@
     .placeholders { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
     .ph { font-family: ui-monospace, Menlo, monospace; font-size: 11px; background: var(--surface2);
       border: 1px solid var(--border); border-radius: 6px; padding: 2px 7px; color: var(--accent2); }
+    .brief-box { min-height: 170px; }
     .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 8px; }
     .modal-error { color: var(--danger); font-size: 13px; margin-bottom: 14px; display: none; }
     .modal-error.show { display: block; }
@@ -65,7 +66,7 @@
   <nav>
     <a href="/">Dashboard</a>
     <a href="/features" class="active">Features</a>
-    <a href="/prompt">Prompt</a>
+    <a href="/prompt">Prompts</a>
     <a href="/docs">Docs</a>
   </nav>
 </header>
@@ -97,6 +98,11 @@
         <textarea id="f-additional" style="min-height:130px" placeholder="e.g. Prioritize companies running data pipelines, batch jobs, or scheduled tasks. Treat agencies and consultancies as weak fits."></textarea>
         <div class="hint">Free-text notes specific to this feature. They're injected into the shared <a href="/prompt" style="color:var(--accent2)">base prompt</a> (which owns the scoring and format) — no placeholders needed here. Leave blank to use the base prompt as-is.</div>
       </div>
+      <div class="field" id="brief-field" style="display:none">
+        <label>Documentation brief <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(editable)</span></label>
+        <div class="hint" style="margin-top:0;margin-bottom:6px">Distilled from the documentation URL with one LLM call and sent to the model in place of the full docs. Edit to override it — your version is then used as-is. Clear the box to have it auto-regenerate on the next crawl.</div>
+        <textarea id="f-brief" class="brief-box" placeholder="Not generated yet — created on the first crawl. You can also write one here to use instead."></textarea>
+      </div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
         <button type="button" class="btn-primary" id="save-btn" onclick="save()">Save Feature</button>
@@ -107,6 +113,7 @@
 
 <script>
 let features = [];
+let origBrief = '';
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function loadFeatures() { features = await fetch('/api/features').then(r => r.json()); render(); }
@@ -143,6 +150,16 @@ function openModal(id) {
   document.getElementById('f-name').value = f ? f.name : '';
   document.getElementById('f-doc').value = f && f.documentation_url ? f.documentation_url : '';
   document.getElementById('f-additional').value = f && f.additional_prompt ? f.additional_prompt : '';
+  const briefField = document.getElementById('brief-field');
+  const briefBox = document.getElementById('f-brief');
+  if (f) {
+    briefField.style.display = 'block';
+    briefBox.value = f.doc_brief || '';
+    origBrief = briefBox.value;
+  } else {
+    briefField.style.display = 'none';
+    origBrief = '';
+  }
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('f-name').focus();
 }
@@ -156,6 +173,10 @@ async function save() {
   };
   if (!payload.name) { showError('Name is required.'); return; }
   if (!payload.documentation_url) { showError('A documentation URL is required.'); return; }
+  // Only send the brief when the user actually changed it, so saving other
+  // fields doesn't freeze an auto-generated brief as a manual override.
+  const briefVal = document.getElementById('f-brief').value.trim();
+  if (id && briefVal !== origBrief.trim()) payload.doc_brief = briefVal;
   const btn = document.getElementById('save-btn'); btn.disabled = true;
   try {
     const res = await fetch(id ? `/api/features/${id}` : '/api/features', { method: id ? 'PUT' : 'POST',

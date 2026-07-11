@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Prompt · Fit Detector</title>
+  <title>Prompts · Fit Detector</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root { --bg: #0f1117; --surface: #1a1d27; --surface2: #23263a; --border: #2e3148;
@@ -18,9 +18,12 @@
     .container { max-width: 900px; margin: 0 auto; padding: 24px 32px; }
     h2 { font-size: 20px; margin-bottom: 8px; }
     .subtitle { color: var(--muted); margin-bottom: 24px; }
-    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; }
+    .panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 22px 24px; margin-bottom: 28px; }
+    .panel h3 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+    .panel .lead { color: var(--muted); font-size: 13px; margin-bottom: 16px; }
+    .panel .lead code, .subtitle code { background: var(--surface2); border: 1px solid var(--border); border-radius: 4px; padding: 0 5px; font-size: 12px; }
     label { display: block; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
-    textarea { width: 100%; min-height: 420px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    textarea { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6; padding: 14px; resize: vertical; }
     textarea:focus { outline: none; border-color: var(--accent); }
     .ph-list { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
@@ -45,57 +48,84 @@
   <nav>
     <a href="/">Dashboard</a>
     <a href="/features">Features</a>
-    <a href="/prompt" class="active">Prompt</a>
+    <a href="/prompt" class="active">Prompts</a>
     <a href="/docs">Docs</a>
   </nav>
 </header>
 <div class="container">
-  <h2>Base Fit Prompt</h2>
-  <p class="subtitle">The single prompt sent to Claude for <em>every</em> assessment. It owns the placeholders, the scoring scale, and the output format. Per-feature nuance is added through each feature's <a href="/features" style="color:var(--accent2)">Additional guidance</a> field, which is injected at <code style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:0 5px">{% raw %}{{FEATURE_INSTRUCTIONS}}{% endraw %}</code>.</p>
+  <h2>Global Prompts</h2>
+  <p class="subtitle">Two prompts drive every crawl, and both are the same for all features — only the placeholders differ per feature. The <strong>distillation prompt</strong> summarizes a feature's docs into a brief (once per crawl); the <strong>base fit prompt</strong> scores each company using that brief.</p>
+
   <div class="panel">
+    <h3>Base fit prompt</h3>
+    <p class="lead">Sent to Claude for <em>every</em> company assessment. Owns the scoring scale and output format. Per-feature nuance is added through each feature's <a href="/features" style="color:var(--accent2)">Additional guidance</a>, injected at <code>{% raw %}{{FEATURE_INSTRUCTIONS}}{% endraw %}</code>.</p>
     <div class="callout">These placeholders are filled in automatically before each request. Keep the ones you want the model to see.</div>
-    <dl class="ph-list" id="placeholders">{% raw %}
+    <dl class="ph-list">{% raw %}
       <div><dt>{{FEATURE_NAME}}</dt><dd>The feature's name.</dd></div>
-      <div><dt>{{FEATURE_DOCUMENTATION}}</dt><dd>Visible text from the feature's documentation URL — that one page — fetched once per crawl.</dd></div>
+      <div><dt>{{FEATURE_DOCUMENTATION}}</dt><dd>A compact <strong>brief</strong> distilled from the feature's documentation URL — not the full page — produced by the distillation prompt below. You can review or hand-edit each feature's brief in the <a href="/features" style="color:var(--accent2)">Features</a> editor.</dd></div>
       <div><dt>{{FEATURE_INSTRUCTIONS}}</dt><dd>This feature's <strong>Additional guidance</strong> field (a short note is inserted when a feature has none).</dd></div>
       <div><dt>{{CUSTOMER_DOMAIN}}</dt><dd>The company's root domain being assessed.</dd></div>
       <div><dt>{{CRAWLED_CONTENT}}</dt><dd>The combined visible text of <strong>every page crawled on that one company's site</strong>, each section headed by its URL — <strong>not a single page</strong>. Gathered from up to 50 pages and capped at ~60,000 characters total. One fit assessment is produced per company from this whole bundle (not one per page).</dd></div>
     {% endraw %}</dl>
-    <label for="prompt" style="margin-top:16px">Prompt template</label>
-    <textarea id="prompt" placeholder="Loading…"></textarea>
+    <label for="base-prompt" style="margin-top:16px">Base fit prompt template</label>
+    <textarea id="base-prompt" style="min-height:380px" placeholder="Loading…"></textarea>
     <div class="actions">
-      <button class="btn-primary" id="save-btn" onclick="save()">Save Prompt</button>
-      <button class="btn-ghost" onclick="resetDefault()">Reset to default</button>
-      <span class="status" id="status"></span>
+      <button class="btn-primary" id="base-save" onclick="save('base')">Save base prompt</button>
+      <button class="btn-ghost" onclick="resetDefault('base')">Reset to default</button>
+      <span class="status" id="base-status"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Documentation distillation prompt</h3>
+    <p class="lead">Run once per crawl to compress a feature's fetched documentation into the compact brief that feeds <code>{% raw %}{{FEATURE_DOCUMENTATION}}{% endraw %}</code> above. It's identical for every feature — only the documentation text differs. Editing it re-distills each feature's brief on its next crawl.</p>
+    <div class="callout">Keep <code>{% raw %}{{DOCUMENTATION}}{% endraw %}</code> in the text — without it the model never sees the docs.</div>
+    <dl class="ph-list">{% raw %}
+      <div><dt>{{FEATURE_NAME}}</dt><dd>The feature's name.</dd></div>
+      <div><dt>{{DOCUMENTATION}}</dt><dd>The visible text fetched from the feature's documentation URL (the full page) — the raw input this prompt summarizes.</dd></div>
+    {% endraw %}</dl>
+    <label for="distill-prompt" style="margin-top:16px">Distillation prompt template</label>
+    <textarea id="distill-prompt" style="min-height:280px" placeholder="Loading…"></textarea>
+    <div class="actions">
+      <button class="btn-primary" id="distill-save" onclick="save('distill')">Save distillation prompt</button>
+      <button class="btn-ghost" onclick="resetDefault('distill')">Reset to default</button>
+      <span class="status" id="distill-status"></span>
     </div>
   </div>
 </div>
 <script>
-let defaultPrompt = '';
-function setStatus(msg, kind) { const el = document.getElementById('status'); el.textContent = msg || ''; el.className = 'status' + (kind ? ' ' + kind : ''); }
+const els = {
+  base:    { ta: 'base-prompt',    btn: 'base-save',    status: 'base-status',    label: 'base prompt' },
+  distill: { ta: 'distill-prompt', btn: 'distill-save', status: 'distill-status', label: 'distillation prompt' },
+};
+const defaults = { base: '', distill: '' };
+function setStatus(which, msg, kind) { const el = document.getElementById(els[which].status); el.textContent = msg || ''; el.className = 'status' + (kind ? ' ' + kind : ''); }
+
 async function load() {
-  const data = await fetch('/api/settings/prompt').then(r => r.json());
-  defaultPrompt = data.default || '';
-  document.getElementById('prompt').value = data.prompt || '';
+  const data = await fetch('/api/settings/prompts').then(r => r.json());
+  defaults.base = data.base.default || '';
+  defaults.distill = data.distill.default || '';
+  document.getElementById(els.base.ta).value = data.base.value || '';
+  document.getElementById(els.distill.ta).value = data.distill.value || '';
 }
-async function save() {
-  const prompt = document.getElementById('prompt').value.trim();
-  if (!prompt) { setStatus('The prompt can\'t be empty.', 'err'); return; }
-  const btn = document.getElementById('save-btn'); btn.disabled = true; setStatus('Saving…');
+async function save(which) {
+  const value = document.getElementById(els[which].ta).value.trim();
+  if (!value) { setStatus(which, `The ${els[which].label} can't be empty.`, 'err'); return; }
+  const btn = document.getElementById(els[which].btn); btn.disabled = true; setStatus(which, 'Saving…');
   try {
-    const res = await fetch('/api/settings/prompt', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+    const res = await fetch('/api/settings/prompts', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [which]: value }) });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) { setStatus(data.error || 'Failed to save.', 'err'); return; }
-    setStatus('Saved. New crawls will use this base prompt.', 'ok');
-  } catch (e) { console.error(e); setStatus('Failed to save.', 'err'); }
+    if (!res.ok) { setStatus(which, data.error || 'Failed to save.', 'err'); return; }
+    setStatus(which, 'Saved. New crawls will use this.', 'ok');
+  } catch (e) { console.error(e); setStatus(which, 'Failed to save.', 'err'); }
   finally { btn.disabled = false; }
 }
-function resetDefault() {
-  if (!confirm('Replace the current prompt with the built-in default? (You still need to Save.)')) return;
-  document.getElementById('prompt').value = defaultPrompt;
-  setStatus('Default loaded — click Save to apply.', 'ok');
+function resetDefault(which) {
+  if (!confirm(`Replace the current ${els[which].label} with the built-in default? (You still need to Save.)`)) return;
+  document.getElementById(els[which].ta).value = defaults[which];
+  setStatus(which, 'Default loaded — click Save to apply.', 'ok');
 }
-load().catch(e => { console.error(e); setStatus('Could not load the prompt.', 'err'); });
+load().catch(e => { console.error(e); setStatus('base', 'Could not load the prompts.', 'err'); });
 </script>
 </body>
 </html>

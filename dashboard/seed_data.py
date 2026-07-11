@@ -68,3 +68,32 @@ Return:
 
 If the crawled content is empty or uninformative, return a low score and say the \
 site could not be meaningfully assessed."""
+
+
+# The global documentation-distillation prompt. It's identical for every feature
+# — the only feature-specific input is the fetched documentation text. Run once
+# per crawl (cached until the docs or this prompt change) to turn a docs page
+# into the compact brief that {{FEATURE_DOCUMENTATION}} carries in the base
+# prompt above.
+#
+# Placeholders:
+#   {{FEATURE_NAME}}    the feature's name
+#   {{DOCUMENTATION}}   visible text fetched from the feature's documentation URL
+DEFAULT_DISTILL_PROMPT = """\
+The text below is documentation for a product feature called "{{FEATURE_NAME}}". \
+Distill it into a concise, self-contained brief that another analyst will use to \
+judge whether a company is a good fit for this feature — without ever seeing the \
+original documentation.
+
+Cover, in this order:
+- What the feature does, in 2-3 sentences.
+- The kinds of companies, teams, technical stacks, or use cases it is built for.
+- Concrete signals on a company's website that would indicate a STRONG fit.
+- Signals that would indicate a WEAK or poor fit.
+
+Be specific and compact — aim for under ~400 words. Output the brief as plain text \
+with no preamble.
+
+<documentation>
+{{DOCUMENTATION}}
+</documentation>"""

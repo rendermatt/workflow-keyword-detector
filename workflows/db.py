@@ -97,11 +97,15 @@ def init_db() -> None:
             )
         """)
 
-        # Per-feature additional guidance (the features table itself is owned by
-        # the dashboard; add the column defensively in case a crawl runs first).
+        # Per-feature columns (the features table itself is owned by the
+        # dashboard; add these defensively in case a crawl runs first).
+        # doc_brief / doc_brief_hash cache the distilled documentation so we only
+        # re-summarize when the docs change.
         cur.execute("SELECT to_regclass('public.features')")
         if cur.fetchone()[0] is not None:
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS additional_prompt TEXT")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief TEXT")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief_hash TEXT")
     logger.info("Database ready")
 
 
@@ -110,7 +114,8 @@ def get_feature(feature_id: int) -> dict | None:
     dashboard), or None if it doesn't exist."""
     with _cursor() as cur:
         cur.execute(
-            "SELECT id, name, documentation_url, additional_prompt FROM features WHERE id = %s",
+            "SELECT id, name, documentation_url, additional_prompt, doc_brief, doc_brief_hash "
+            "FROM features WHERE id = %s",
             (feature_id,),
         )
         row = cur.fetchone()
@@ -121,7 +126,19 @@ def get_feature(feature_id: int) -> dict | None:
             "name": row[1],
             "documentation_url": row[2],
             "additional_prompt": row[3],
+            "doc_brief": row[4],
+            "doc_brief_hash": row[5],
         }
+
+
+def save_doc_brief(feature_id: int, brief: str, content_hash: str) -> None:
+    """Cache the distilled documentation brief and the hash of the docs it was
+    derived from, so future crawls skip re-distilling unchanged documentation."""
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE features SET doc_brief = %s, doc_brief_hash = %s WHERE id = %s",
+            (brief, content_hash, feature_id),
+        )
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

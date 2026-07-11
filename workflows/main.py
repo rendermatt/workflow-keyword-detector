@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -12,7 +13,14 @@ import requests
 from bs4 import BeautifulSoup
 from render_sdk import Retry, Workflows
 
-from db import get_feature, get_setting, init_db, record_page, save_fit_assessment
+from db import (
+    get_feature,
+    get_setting,
+    init_db,
+    record_page,
+    save_doc_brief,
+    save_fit_assessment,
+)
 
 logging.basicConfig(level=logging.WARNING)
 logger = logging.getLogger(__name__)
@@ -82,6 +90,27 @@ content is empty or uninformative, return a low score and say so."""
 
 # Shown in the base prompt when a feature provides no additional guidance.
 _NO_FEATURE_INSTRUCTIONS = "(no additional guidance provided for this feature)"
+
+# Fallback for the editable global distillation prompt (app_settings key
+# 'distill_prompt'). Same for every feature — only {{DOCUMENTATION}} differs.
+DISTILL_PROMPT = """\
+The text below is documentation for a product feature called "{{FEATURE_NAME}}". \
+Distill it into a concise, self-contained brief that another analyst will use to \
+judge whether a company is a good fit for this feature — without ever seeing the \
+original documentation.
+
+Cover, in this order:
+- What the feature does, in 2-3 sentences.
+- The kinds of companies, teams, technical stacks, or use cases it is built for.
+- Concrete signals on a company's website that would indicate a STRONG fit.
+- Signals that would indicate a WEAK or poor fit.
+
+Be specific and compact — aim for under ~400 words. Output the brief as plain text \
+with no preamble.
+
+<documentation>
+{{DOCUMENTATION}}
+</documentation>"""
 
 # File extensions that aren't crawlable HTML pages.
 _SKIP_EXTENSIONS = (
@@ -211,6 +240,63 @@ def _fetch_doc_content(url: str) -> str:
         return ""
 
 
+def _distill_docs(feature_name: str, doc_content: str, template: str) -> str:
+    """One LLM call: compress the raw documentation into a compact fit brief,
+    using the editable global distillation prompt."""
+    prompt = template.replace("{{FEATURE_NAME}}", feature_name or "").replace(
+        "{{DOCUMENTATION}}", doc_content
+    )
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=FIT_MODEL,
+        max_tokens=2000,
+        output_config={"effort": "low"},  # summarization — cheap/fast
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), None)
+    if not text:
+        raise RuntimeError(f"distillation returned no text (stop_reason={response.stop_reason})")
+    return text.strip()
+
+
+# doc_brief_hash sentinel meaning "a human edited this brief — use it verbatim".
+_MANUAL_BRIEF = "manual"
+
+
+def _resolve_doc_brief(feature: dict, doc_content: str) -> str:
+    """Return the feature's documentation brief, distilling it only when needed.
+    The result is what each per-company call sees as the documentation — a small
+    brief instead of the full page.
+
+    A manually-edited brief (hash sentinel 'manual') is authoritative and used
+    verbatim; otherwise the auto brief is reused while the docs are unchanged and
+    re-distilled when they change.
+    """
+    if feature.get("doc_brief") and feature.get("doc_brief_hash") == _MANUAL_BRIEF:
+        logger.info("Using manually-edited documentation brief for feature %s", feature["id"])
+        return feature["doc_brief"]
+    if not doc_content.strip():
+        return ""
+    # Fold the distillation prompt into the cache key so editing that prompt
+    # re-distills on the next crawl (not only when the docs themselves change).
+    distill_template = get_setting("distill_prompt") or DISTILL_PROMPT
+    content_hash = hashlib.sha256(
+        (distill_template + "\x00" + doc_content).encode("utf-8")
+    ).hexdigest()
+    if feature.get("doc_brief") and feature.get("doc_brief_hash") == content_hash:
+        logger.info("Reusing cached documentation brief for feature %s", feature["id"])
+        return feature["doc_brief"]
+    try:
+        brief = _distill_docs(feature["name"], doc_content, distill_template)
+    except Exception:
+        # Fall back to the raw docs so assessments still run.
+        logger.exception("Documentation distillation failed; falling back to raw docs")
+        return doc_content
+    save_doc_brief(feature["id"], brief, content_hash)
+    logger.info("Distilled documentation brief for feature %s (%d chars)", feature["id"], len(brief))
+    return brief
+
+
 def _crawl_site(seed_url: str, run_id: str, feature_id: int) -> dict:
     """Crawl a seed URL and same-domain links (BFS), recording coverage in
     crawled_pages and accumulating visible page text up to CRAWL_CONTENT_CHARS.
@@ -307,7 +393,7 @@ _CUSTOMER_TOKENS = ("{{CUSTOMER_DOMAIN}}", "{{CRAWLED_CONTENT}}")
 
 
 def _build_user_content(
-    template: str, feature_name: str, doc_content: str, domain: str, content: str
+    template: str, feature_name: str, doc_brief: str, domain: str, content: str
 ) -> list[dict]:
     """Fill the prompt template and split it into a cacheable prefix (feature
     name + documentation + instructions — identical for every company in a run)
@@ -320,7 +406,7 @@ def _build_user_content(
     stable = (
         template
         .replace("{{FEATURE_NAME}}", feature_name or "")
-        .replace("{{FEATURE_DOCUMENTATION}}", doc_content or "(no documentation could be fetched)")
+        .replace("{{FEATURE_DOCUMENTATION}}", doc_brief or "(no documentation could be fetched)")
     )
 
     def fill_customer(s: str) -> str:
@@ -356,11 +442,11 @@ def _tier_for(score: int) -> str:
 
 
 def _assess_fit(
-    feature_name: str, doc_content: str, domain: str, content: str, prompt_template: str
+    feature_name: str, doc_brief: str, domain: str, content: str, prompt_template: str
 ) -> dict:
     """Call Claude to score how well the crawled company fits the feature."""
     content_blocks = _build_user_content(
-        prompt_template, feature_name, doc_content, domain, content
+        prompt_template, feature_name, doc_brief, domain, content
     )
     client = anthropic.Anthropic()
     response = client.messages.create(
@@ -394,7 +480,7 @@ def assess_domain(
     feature_id: int,
     run_id: str,
     feature_name: str,
-    doc_content: str,
+    doc_brief: str,
     prompt_template: str,
 ) -> dict:
     """Crawl one prospect domain, then ask Claude how well it fits the feature.
@@ -410,7 +496,7 @@ def assess_domain(
     }
     try:
         assessment.update(
-            _assess_fit(feature_name, doc_content, domain, crawl["text"], prompt_template)
+            _assess_fit(feature_name, doc_brief, domain, crawl["text"], prompt_template)
         )
     except Exception as exc:
         logger.exception("Fit assessment failed for %s", domain)
@@ -456,16 +542,21 @@ async def run_crawl(feature_id: int, domains: list[str]) -> dict:
         (feature.get("additional_prompt") or "").strip() or _NO_FEATURE_INSTRUCTIONS,
     )
 
+    # Fetch the docs once (HTTP), then distill them into a compact brief with a
+    # single LLM call — cached across runs so unchanged docs aren't re-distilled.
+    # Every per-company call sees this small brief instead of the full page.
     doc_content = _fetch_doc_content(feature["documentation_url"])
+    doc_brief = _resolve_doc_brief(feature, doc_content)
     logger.info(
         f"Starting run {run_id} for feature {feature_id} ({feature['name']}): "
-        f"{len(seeds)} seed domains, {len(doc_content)} chars of documentation"
+        f"{len(seeds)} seed domains, {len(doc_content)} chars of docs → "
+        f"{len(doc_brief)} char brief"
     )
 
     results = await asyncio.gather(
         *[
             assess_domain(
-                seed, feature_id, run_id, feature["name"], doc_content, prompt_template
+                seed, feature_id, run_id, feature["name"], doc_brief, prompt_template
             )
             for seed in seeds
         ]

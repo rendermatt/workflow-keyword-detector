@@ -5,7 +5,7 @@ from flask import Flask, jsonify, render_template, request
 import psycopg2
 import psycopg2.extras
 
-from seed_data import DEFAULT_FIT_PROMPT, SEED_FEATURES
+from seed_data import DEFAULT_DISTILL_PROMPT, DEFAULT_FIT_PROMPT, SEED_FEATURES
 
 DB_URL = os.environ["DATABASE_URL"]
 
@@ -41,12 +41,17 @@ def init_schema() -> None:
                     name              TEXT        NOT NULL UNIQUE,
                     documentation_url TEXT,
                     additional_prompt TEXT,
+                    doc_brief         TEXT,
+                    doc_brief_hash    TEXT,
                     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
-            # Per-feature additional guidance (added in place for pre-existing tables).
+            # Added in place for pre-existing tables. doc_brief is the distilled
+            # documentation the workflow generates and reuses across crawls.
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS additional_prompt TEXT")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief TEXT")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief_hash TEXT")
 
             # Crawl coverage (also created by the workflow's db.init_db); ensured
             # here so the dashboard works before the first crawl runs. The
@@ -117,11 +122,16 @@ def init_schema() -> None:
                         (feat["name"], feat.get("documentation_url")),
                     )
 
-            # Seed the default fit prompt only if not present.
+            # Seed the default base + distillation prompts only if not present.
             cur.execute(
                 "INSERT INTO app_settings (key, value) VALUES ('fit_prompt', %s) "
                 "ON CONFLICT (key) DO NOTHING",
                 (DEFAULT_FIT_PROMPT,),
+            )
+            cur.execute(
+                "INSERT INTO app_settings (key, value) VALUES ('distill_prompt', %s) "
+                "ON CONFLICT (key) DO NOTHING",
+                (DEFAULT_DISTILL_PROMPT,),
             )
 
 
@@ -332,7 +342,7 @@ def api_crawl():
 
 def _fetch_features(cur):
     cur.execute("""
-        SELECT id, name, documentation_url, additional_prompt, created_at, updated_at
+        SELECT id, name, documentation_url, additional_prompt, doc_brief, created_at, updated_at
         FROM features
         ORDER BY name
     """)
@@ -398,6 +408,22 @@ def api_update_feature(feature_id):
                 "additional_prompt = %s, updated_at = NOW() WHERE id = %s",
                 (name, doc_url, additional, feature_id),
             )
+            # A manually-edited brief is marked authoritative (hash sentinel
+            # 'manual') so the workflow uses it as-is; clearing it reverts to the
+            # auto-distilled brief on the next crawl. The field is only present
+            # in the payload when the user actually changed it.
+            if "doc_brief" in data:
+                brief = (data.get("doc_brief") or "").strip()
+                if brief:
+                    cur.execute(
+                        "UPDATE features SET doc_brief = %s, doc_brief_hash = 'manual' WHERE id = %s",
+                        (brief, feature_id),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE features SET doc_brief = NULL, doc_brief_hash = NULL WHERE id = %s",
+                        (feature_id,),
+                    )
     return jsonify(id=feature_id)
 
 
@@ -416,29 +442,47 @@ def api_delete_feature(feature_id):
 
 # --- Prompt settings API -----------------------------------------------------
 
-@app.route("/api/settings/prompt", methods=["GET"])
-def api_get_prompt():
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT value FROM app_settings WHERE key = 'fit_prompt'")
-            row = cur.fetchone()
-    prompt = row["value"] if row else DEFAULT_FIT_PROMPT
-    return jsonify(prompt=prompt, default=DEFAULT_FIT_PROMPT)
-
-
-@app.route("/api/settings/prompt", methods=["PUT"])
-def api_set_prompt():
-    data = request.get_json(silent=True) or {}
-    prompt = (data.get("prompt") or "").strip()
-    if not prompt:
-        return jsonify(error="The prompt can't be empty"), 400
+@app.route("/api/settings/prompts", methods=["GET"])
+def api_get_prompts():
+    """The two global prompts: the base fit prompt (scoring) and the
+    documentation distillation prompt."""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO app_settings (key, value) VALUES ('fit_prompt', %s) "
-                "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
-                (prompt,),
+                "SELECT key, value FROM app_settings WHERE key IN ('fit_prompt', 'distill_prompt')"
             )
+            vals = {r["key"]: r["value"] for r in cur.fetchall()}
+    return jsonify(
+        base={"value": vals.get("fit_prompt", DEFAULT_FIT_PROMPT), "default": DEFAULT_FIT_PROMPT},
+        distill={"value": vals.get("distill_prompt", DEFAULT_DISTILL_PROMPT), "default": DEFAULT_DISTILL_PROMPT},
+    )
+
+
+@app.route("/api/settings/prompts", methods=["PUT"])
+def api_set_prompts():
+    """Update either or both global prompts. Body: {base?: str, distill?: str}."""
+    data = request.get_json(silent=True) or {}
+    updates = {}
+    if "base" in data:
+        v = (data.get("base") or "").strip()
+        if not v:
+            return jsonify(error="The base prompt can't be empty"), 400
+        updates["fit_prompt"] = v
+    if "distill" in data:
+        v = (data.get("distill") or "").strip()
+        if not v:
+            return jsonify(error="The distillation prompt can't be empty"), 400
+        updates["distill_prompt"] = v
+    if not updates:
+        return jsonify(error="Nothing to update"), 400
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            for key, value in updates.items():
+                cur.execute(
+                    "INSERT INTO app_settings (key, value) VALUES (%s, %s) "
+                    "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()",
+                    (key, value),
+                )
     return jsonify(ok=True)
 
 
