@@ -97,11 +97,11 @@ def init_db() -> None:
             )
         """)
 
-        # Per-feature prompt override (the features table itself is owned by the
-        # dashboard; add the column defensively in case a crawl runs first).
+        # Per-feature additional guidance (the features table itself is owned by
+        # the dashboard; add the column defensively in case a crawl runs first).
         cur.execute("SELECT to_regclass('public.features')")
         if cur.fetchone()[0] is not None:
-            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS fit_prompt TEXT")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS additional_prompt TEXT")
     logger.info("Database ready")
 
 
@@ -110,7 +110,7 @@ def get_feature(feature_id: int) -> dict | None:
     dashboard), or None if it doesn't exist."""
     with _cursor() as cur:
         cur.execute(
-            "SELECT id, name, documentation_url, fit_prompt FROM features WHERE id = %s",
+            "SELECT id, name, documentation_url, additional_prompt FROM features WHERE id = %s",
             (feature_id,),
         )
         row = cur.fetchone()
@@ -120,7 +120,7 @@ def get_feature(feature_id: int) -> dict | None:
             "id": row[0],
             "name": row[1],
             "documentation_url": row[2],
-            "fit_prompt": row[3],
+            "additional_prompt": row[3],
         }
 
 

@@ -50,18 +50,22 @@ FIT_SCHEMA = {
     "additionalProperties": False,
 }
 
-# Fallback used only if the editable prompt is missing from app_settings.
+# Fallback used only if the editable base prompt is missing from app_settings.
 DEFAULT_FIT_PROMPT = """\
 You are a go-to-market analyst deciding whether a company would be a good fit for \
 a specific product feature.
 
 The feature you are evaluating fit for is "{{FEATURE_NAME}}".
 
-Here is the feature's official documentation, which describes what it does and who \
-it is for:
+Here is the feature's official documentation:
 <feature_documentation>
 {{FEATURE_DOCUMENTATION}}
 </feature_documentation>
+
+Additional guidance specific to this feature (may be empty):
+<feature_specific_guidance>
+{{FEATURE_INSTRUCTIONS}}
+</feature_specific_guidance>
 
 You are evaluating the company at the domain "{{CUSTOMER_DOMAIN}}". Below is text \
 crawled from across their public website:
@@ -75,6 +79,9 @@ Based only on the evidence above, assess how strong a fit this company is for th
 specific evidence, a list of concrete signals from the crawled content, and a one \
 sentence recommendation for how a sales team should approach them. If the crawled \
 content is empty or uninformative, return a low score and say so."""
+
+# Shown in the base prompt when a feature provides no additional guidance.
+_NO_FEATURE_INSTRUCTIONS = "(no additional guidance provided for this feature)"
 
 # File extensions that aren't crawlable HTML pages.
 _SKIP_EXTENSIONS = (
@@ -440,12 +447,13 @@ async def run_crawl(feature_id: int, domains: list[str]) -> dict:
     if not seeds:
         raise ValueError("No domains provided to crawl")
 
-    # Resolve the prompt once per run: the feature's own prompt wins, then the
-    # editable global default, then the built-in fallback.
-    prompt_template = (
-        feature.get("fit_prompt")
-        or get_setting("fit_prompt")
-        or DEFAULT_FIT_PROMPT
+    # One global base prompt (editable in app_settings) owns the placeholders and
+    # scoring. Inject this feature's additional guidance once per run — it's
+    # constant across companies, so it stays inside the cacheable prefix.
+    base_prompt = get_setting("fit_prompt") or DEFAULT_FIT_PROMPT
+    prompt_template = base_prompt.replace(
+        "{{FEATURE_INSTRUCTIONS}}",
+        (feature.get("additional_prompt") or "").strip() or _NO_FEATURE_INSTRUCTIONS,
     )
 
     doc_content = _fetch_doc_content(feature["documentation_url"])

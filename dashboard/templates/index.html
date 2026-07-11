@@ -116,9 +116,18 @@
     .file-info { font-size: 13px; color: var(--muted); }
     .crawl-status { font-size: 13px; margin-top: 4px; min-height: 1em; }
     .crawl-status.ok { color: var(--accent2); } .crawl-status.err { color: var(--unlikely); }
-    .domain-preview { margin-top: 10px; max-height: 140px; overflow-y: auto; font-size: 12px; color: var(--muted);
-      font-family: ui-monospace, Menlo, monospace; display: none; }
-    .domain-preview.show { display: block; }
+    .crawl-select { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+    .cs-head { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--muted); }
+    .cs-actions button { background: none; border: none; color: var(--accent2); cursor: pointer; font-size: 12px; padding: 0; font-family: inherit; }
+    .cs-actions button:hover { text-decoration: underline; }
+    .cs-list { max-height: 240px; overflow-y: auto; }
+    .cs-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; font-size: 13px; }
+    .cs-row:last-child { border-bottom: none; }
+    .cs-row:hover { background: var(--surface2); }
+    .cs-row input { accent-color: var(--accent); width: 15px; height: 15px; flex: none; }
+    .cs-domain { color: var(--text); word-break: break-all; }
+    .cs-meta { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; padding-left: 10px; }
+    .cs-meta.crawled { color: var(--weak); }
   </style>
 </head>
 <body>
@@ -189,8 +198,14 @@
         <label class="file-btn">Choose CSV<input type="file" id="crawl-csv" accept=".csv,text/csv" hidden /></label>
         <span class="file-info" id="crawl-file-info">No file selected</span>
       </div>
-      <div class="hint">A <code>url</code> or <code>domain</code> column, else the first column. One domain per row (e.g. <code>example.com</code>).</div>
-      <div class="domain-preview" id="crawl-preview"></div>
+      <div class="hint">A <code>url</code> or <code>domain</code> column, else the first column. One domain per row (e.g. <code>example.com</code>). Domains already crawled for this feature start unselected; new ones start selected.</div>
+      <div class="crawl-select" id="crawl-select" style="display:none">
+        <div class="cs-head">
+          <span id="cs-count"></span>
+          <span class="cs-actions"><button type="button" onclick="selectAllDomains(true)">Select all</button> · <button type="button" onclick="selectAllDomains(false)">Deselect all</button></span>
+        </div>
+        <div class="cs-list" id="cs-list"></div>
+      </div>
     </div>
     <div class="crawl-status" id="crawl-status"></div>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:8px">
@@ -345,8 +360,8 @@ function openCrawlModal() {
   crawlDomains = [];
   document.getElementById('crawl-csv').value = '';
   document.getElementById('crawl-file-info').textContent = 'No file selected';
-  document.getElementById('crawl-preview').classList.remove('show');
-  document.getElementById('crawl-preview').innerHTML = '';
+  document.getElementById('crawl-select').style.display = 'none';
+  document.getElementById('cs-list').innerHTML = '';
   setCrawlStatus(''); document.getElementById('crawl-start').disabled = false;
   document.getElementById('crawl-feature').value = document.getElementById('feature-filter').value;
   document.getElementById('crawl-modal').classList.add('open');
@@ -380,22 +395,68 @@ document.getElementById('crawl-csv').addEventListener('change', ev => {
   reader.onload = () => {
     try {
       crawlDomains = parseDomainsCsv(String(reader.result));
-      const preview = document.getElementById('crawl-preview');
       document.getElementById('crawl-file-info').textContent = `${file.name} — ${crawlDomains.length} domain${crawlDomains.length === 1 ? '' : 's'}`;
-      if (crawlDomains.length) { preview.innerHTML = crawlDomains.map(d => esc(d)).join('<br>'); preview.classList.add('show'); setCrawlStatus(''); }
-      else { preview.classList.remove('show'); setCrawlStatus('No domains found in that file.', 'err'); }
+      if (crawlDomains.length) { setCrawlStatus(''); renderDomainSelection(); }
+      else { document.getElementById('crawl-select').style.display = 'none'; setCrawlStatus('No domains found in that file.', 'err'); }
     } catch (err) { console.error(err); setCrawlStatus('Could not read that file.', 'err'); }
   };
   reader.readAsText(file);
 });
+// Re-check previous crawls if the feature changes after a CSV is loaded.
+document.getElementById('crawl-feature').addEventListener('change', () => { if (crawlDomains.length) renderDomainSelection(); });
+
+async function renderDomainSelection() {
+  const wrap = document.getElementById('crawl-select');
+  const listEl = document.getElementById('cs-list');
+  const featureId = document.getElementById('crawl-feature').value;
+  if (!crawlDomains.length || !featureId) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+  listEl.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:13px">Checking previous crawls…</div>';
+  let rows;
+  try {
+    rows = await fetch('/api/crawl/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ feature_id: Number(featureId), domains: crawlDomains }) }).then(r => r.json());
+  } catch (err) {
+    console.error(err);
+    listEl.innerHTML = '<div style="padding:12px;color:var(--unlikely);font-size:13px">Couldn\'t check previous crawls.</div>';
+    return;
+  }
+  listEl.innerHTML = '';
+  rows.forEach(r => {
+    const crawled = !!r.last_crawled;
+    const baseNote = (r.base_domain && r.base_domain !== r.domain.toLowerCase()) ? `${esc(r.base_domain)} · ` : '';
+    const meta = crawled ? `${baseNote}last crawled ${fmtDate(r.last_crawled)}` : `${baseNote}never crawled`;
+    const row = document.createElement('label'); row.className = 'cs-row';
+    row.innerHTML = `<input type="checkbox" ${crawled ? '' : 'checked'} data-domain="${esc(r.domain)}">
+      <span class="cs-domain">${esc(r.domain)}</span>
+      <span class="cs-meta ${crawled ? 'crawled' : ''}">${meta}</span>`;
+    row.querySelector('input').addEventListener('change', updateSelectionCount);
+    listEl.appendChild(row);
+  });
+  updateSelectionCount();
+}
+function selectedDomains() {
+  return Array.from(document.querySelectorAll('#cs-list input:checked')).map(i => i.dataset.domain);
+}
+function updateSelectionCount() {
+  const total = document.querySelectorAll('#cs-list input').length;
+  document.getElementById('cs-count').textContent = `${selectedDomains().length} of ${total} selected`;
+}
+function selectAllDomains(checked) {
+  document.querySelectorAll('#cs-list input').forEach(i => { i.checked = checked; });
+  updateSelectionCount();
+}
+
 async function startCrawl() {
   const featureId = document.getElementById('crawl-feature').value;
   if (!featureId) { setCrawlStatus('Select a feature.', 'err'); return; }
   if (!crawlDomains.length) { setCrawlStatus('Upload a CSV of domains first.', 'err'); return; }
+  const domains = selectedDomains();
+  if (!domains.length) { setCrawlStatus('Select at least one domain to crawl.', 'err'); return; }
   const btn = document.getElementById('crawl-start'); btn.disabled = true; setCrawlStatus('Starting crawl…');
   try {
     const res = await fetch('/api/crawl', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ feature_id: Number(featureId), domains: crawlDomains }) });
+      body: JSON.stringify({ feature_id: Number(featureId), domains }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { setCrawlStatus(data.error || 'Failed to start crawl.', 'err'); btn.disabled = false; return; }
     setCrawlStatus(`Crawl started for “${data.feature}” over ${data.domains} compan${data.domains === 1 ? 'y' : 'ies'}. `

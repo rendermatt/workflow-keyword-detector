@@ -14,9 +14,14 @@ SEED_FEATURES = [
     },
 ]
 
+# The single global base prompt. It owns the placeholders and standardizes the
+# scoring + output format; each feature contributes only the free-text snippet
+# that lands at {{FEATURE_INSTRUCTIONS}}.
+#
 # Placeholders substituted at assessment time (double-brace tokens):
 #   {{FEATURE_NAME}}          the feature we're scoring fit for
 #   {{FEATURE_DOCUMENTATION}} text fetched from the feature's documentation URL
+#   {{FEATURE_INSTRUCTIONS}}  the feature's own "additional guidance" field
 #   {{CUSTOMER_DOMAIN}}       the root domain we crawled (the prospect)
 #   {{CRAWLED_CONTENT}}       visible text gathered across the prospect's site
 DEFAULT_FIT_PROMPT = """\
@@ -30,6 +35,12 @@ it is for:
 <feature_documentation>
 {{FEATURE_DOCUMENTATION}}
 </feature_documentation>
+
+Additional guidance specific to this feature (may be empty) — when present, weight \
+it heavily alongside the documentation:
+<feature_specific_guidance>
+{{FEATURE_INSTRUCTIONS}}
+</feature_specific_guidance>
 
 You are evaluating the company at the domain "{{CUSTOMER_DOMAIN}}". Below is text \
 crawled from across their public website — marketing pages, product and docs pages, \

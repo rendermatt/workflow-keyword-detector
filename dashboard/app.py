@@ -1,5 +1,6 @@
 import os
 import threading
+from urllib.parse import urlparse
 from flask import Flask, jsonify, render_template, request
 import psycopg2
 import psycopg2.extras
@@ -15,6 +16,20 @@ def get_conn():
     return psycopg2.connect(DB_URL, cursor_factory=psycopg2.extras.RealDictCursor)
 
 
+def _base_domain(raw: str) -> str:
+    """Registrable domain (last two labels) for a raw CSV entry — mirrors the
+    workflow's `_base_domain` so the dashboard can match uploaded domains against
+    prior crawls, which are stored under the base domain (e.g. docs.foo.ai → foo.ai)."""
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    if not s.startswith(("http://", "https://")):
+        s = "https://" + s
+    host = urlparse(s).netloc.lower().split(":")[0]
+    parts = [p for p in host.split(".") if p]
+    return ".".join(parts[-2:]) if len(parts) > 2 else ".".join(parts)
+
+
 def init_schema() -> None:
     """Create the tables the dashboard reads/writes, seed a starter feature, and
     seed the default fit prompt. Idempotent — safe to run on every import."""
@@ -25,13 +40,13 @@ def init_schema() -> None:
                     id                SERIAL      PRIMARY KEY,
                     name              TEXT        NOT NULL UNIQUE,
                     documentation_url TEXT,
-                    fit_prompt        TEXT,
+                    additional_prompt TEXT,
                     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
-            # Per-feature prompt override (added in place for pre-existing tables).
-            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS fit_prompt TEXT")
+            # Per-feature additional guidance (added in place for pre-existing tables).
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS additional_prompt TEXT")
 
             # Crawl coverage (also created by the workflow's db.init_db); ensured
             # here so the dashboard works before the first crawl runs. The
@@ -92,15 +107,14 @@ def init_schema() -> None:
                 )
             """)
 
-            # Seed a starter feature (with its own copy of the default prompt)
-            # only if none exist yet.
+            # Seed a starter feature only if none exist yet (no additional
+            # guidance — it inherits the global base prompt as-is).
             cur.execute("SELECT COUNT(*) AS n FROM features")
             if cur.fetchone()["n"] == 0:
                 for feat in SEED_FEATURES:
                     cur.execute(
-                        "INSERT INTO features (name, documentation_url, fit_prompt) "
-                        "VALUES (%s, %s, %s)",
-                        (feat["name"], feat.get("documentation_url"), DEFAULT_FIT_PROMPT),
+                        "INSERT INTO features (name, documentation_url) VALUES (%s, %s)",
+                        (feat["name"], feat.get("documentation_url")),
                     )
 
             # Seed the default fit prompt only if not present.
@@ -229,6 +243,39 @@ def api_domain_pages(domain):
     ])
 
 
+@app.route("/api/crawl/preview", methods=["POST"])
+def api_crawl_preview():
+    """For a feature + a list of raw CSV domains, return each one's registrable
+    base domain and when it was last assessed for this feature (null if never).
+    The crawl modal uses this to pre-select only the not-yet-crawled domains."""
+    data = request.get_json(silent=True) or {}
+    try:
+        feature_id = int(data.get("feature_id"))
+    except (TypeError, ValueError):
+        return jsonify(error="Select a feature."), 400
+    domains = [d for d in (data.get("domains") or []) if isinstance(d, str) and d.strip()]
+
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT domain, MAX(assessed_at) AS last FROM fit_assessments "
+                "WHERE feature_id = %s GROUP BY domain",
+                (feature_id,),
+            )
+            last = {r["domain"]: r["last"] for r in cur.fetchall()}
+
+    out = []
+    for d in domains:
+        base = _base_domain(d)
+        ts = last.get(base)
+        out.append({
+            "domain": d,
+            "base_domain": base,
+            "last_crawled": ts.isoformat() if ts else None,
+        })
+    return jsonify(out)
+
+
 @app.route("/api/crawl", methods=["POST"])
 def api_crawl():
     """Kick off a crawl + fit assessment for a feature over a list of domains by
@@ -283,16 +330,9 @@ def api_crawl():
 
 # --- Feature management API --------------------------------------------------
 
-def _default_prompt(cur):
-    """The editable global default prompt (fallback for features without one)."""
-    cur.execute("SELECT value FROM app_settings WHERE key = 'fit_prompt'")
-    row = cur.fetchone()
-    return row["value"] if row else DEFAULT_FIT_PROMPT
-
-
 def _fetch_features(cur):
     cur.execute("""
-        SELECT id, name, documentation_url, fit_prompt, created_at, updated_at
+        SELECT id, name, documentation_url, additional_prompt, created_at, updated_at
         FROM features
         ORDER BY name
     """)
@@ -311,7 +351,7 @@ def api_create_feature():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     doc_url = (data.get("documentation_url") or "").strip()
-    prompt = (data.get("fit_prompt") or "").strip()
+    additional = (data.get("additional_prompt") or "").strip() or None
     if not name:
         return jsonify(error="Name is required"), 400
     if not doc_url:
@@ -322,11 +362,10 @@ def api_create_feature():
             cur.execute("SELECT 1 FROM features WHERE LOWER(name) = LOWER(%s)", (name,))
             if cur.fetchone():
                 return jsonify(error=f"A feature named “{name}” already exists"), 409
-            # Blank prompt → start from the global default so every feature has one.
             cur.execute(
-                "INSERT INTO features (name, documentation_url, fit_prompt) "
+                "INSERT INTO features (name, documentation_url, additional_prompt) "
                 "VALUES (%s, %s, %s) RETURNING id",
-                (name, doc_url, prompt or _default_prompt(cur)),
+                (name, doc_url, additional),
             )
             fid = cur.fetchone()["id"]
     return jsonify(id=fid), 201
@@ -337,7 +376,7 @@ def api_update_feature(feature_id):
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
     doc_url = (data.get("documentation_url") or "").strip()
-    prompt = (data.get("fit_prompt") or "").strip()
+    additional = (data.get("additional_prompt") or "").strip() or None
     if not name:
         return jsonify(error="Name is required"), 400
     if not doc_url:
@@ -356,8 +395,8 @@ def api_update_feature(feature_id):
                 return jsonify(error=f"A feature named “{name}” already exists"), 409
             cur.execute(
                 "UPDATE features SET name = %s, documentation_url = %s, "
-                "fit_prompt = %s, updated_at = NOW() WHERE id = %s",
-                (name, doc_url, prompt or _default_prompt(cur), feature_id),
+                "additional_prompt = %s, updated_at = NOW() WHERE id = %s",
+                (name, doc_url, additional, feature_id),
             )
     return jsonify(id=feature_id)
 

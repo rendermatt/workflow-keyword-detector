@@ -64,8 +64,9 @@
     <ol class="steps">
       <li>You start a crawl from the dashboard's <strong>New Crawl</strong> button: pick a feature and upload a CSV of company domains. A bare domain like <code>example.com</code> is treated as <code>https://example.com</code>.</li>
       <li>The workflow first fetches the <strong>feature's documentation page</strong> so the model knows what the feature actually does.</li>
-      <li>For each company, starting from its seed domain, it <strong>follows links across the same registrable domain</strong> (including subdomains) — breadth-first — gathering visible text from marketing pages, docs, blog posts, careers pages, and the like. (15-second timeout, honors <code>robots.txt</code>.)</li>
-      <li>The feature documentation plus the crawled site text are sent to <strong>Claude</strong>, which returns a structured <strong>fit score (0-100)</strong>, a tier, a plain-language summary, the concrete signals it found, and a recommended sales angle.</li>
+      <li>For each company, starting from its seed domain, it <strong>follows links across the same registrable domain</strong> (including subdomains) — breadth-first — gathering the visible text of marketing pages, docs, blog posts, careers pages, and the like. (15-second timeout, honors <code>robots.txt</code>.)</li>
+      <li>All of that company's crawled pages are <strong>concatenated into one bundle</strong> — each section headed by its URL, up to 50 pages and capped at ~60,000 characters — which becomes <code>{% raw %}{{CRAWLED_CONTENT}}{% endraw %}</code> in the prompt.</li>
+      <li>The feature documentation plus that combined text are sent to <strong>Claude</strong> in a <strong>single call per company</strong> (not one per page), which returns a structured <strong>fit score (0-100)</strong>, a tier, a plain-language summary, the concrete signals it found, and a recommended sales angle.</li>
       <li>Results are <strong>upserted</strong> per (feature, company), so re-crawling a feature refreshes the scores instead of duplicating them.</li>
     </ol>
     <div class="callout">

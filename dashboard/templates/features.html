@@ -93,16 +93,9 @@
         <div class="hint">Required. This page is fetched and given to the LLM as the definition of the feature.</div>
       </div>
       <div class="field">
-        <div class="label-row">
-          <label for="f-prompt">Assessment prompt</label>
-          <button type="button" class="link-btn" onclick="loadDefaultPrompt()">Reset to default</button>
-        </div>
-        <textarea id="f-prompt" placeholder="How Claude should judge fit for this feature…"></textarea>
-        <div class="hint">This feature's own prompt — Claude runs it against every company you crawl for it. Keep the placeholders below; they're filled in per company.</div>
-        <div class="placeholders">{% raw %}
-          <span class="ph">{{FEATURE_NAME}}</span><span class="ph">{{FEATURE_DOCUMENTATION}}</span>
-          <span class="ph">{{CUSTOMER_DOMAIN}}</span><span class="ph">{{CRAWLED_CONTENT}}</span>
-        {% endraw %}</div>
+        <label for="f-additional">Additional guidance <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(optional)</span></label>
+        <textarea id="f-additional" style="min-height:130px" placeholder="e.g. Prioritize companies running data pipelines, batch jobs, or scheduled tasks. Treat agencies and consultancies as weak fits."></textarea>
+        <div class="hint">Free-text notes specific to this feature. They're injected into the shared <a href="/prompt" style="color:var(--accent2)">base prompt</a> (which owns the scoring and format) — no placeholders needed here. Leave blank to use the base prompt as-is.</div>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
@@ -114,16 +107,9 @@
 
 <script>
 let features = [];
-let defaultPrompt = '';
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function loadFeatures() { features = await fetch('/api/features').then(r => r.json()); render(); }
-async function loadDefault() {
-  // The global default (app_settings) new features start from and "reset" loads.
-  const d = await fetch('/api/settings/prompt').then(r => r.json());
-  defaultPrompt = d.prompt || '';
-}
-function loadDefaultPrompt() { document.getElementById('f-prompt').value = defaultPrompt; }
 function render() {
   const list = document.getElementById('list');
   if (!features.length) {
@@ -136,8 +122,11 @@ function render() {
       ? `<a href="${esc(f.documentation_url)}" target="_blank" rel="noopener">
            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>${esc(f.documentation_url)}</a>`
       : `<span class="none">No documentation link — required for scoring</span>`;
+    const guidance = f.additional_prompt
+      ? `<div style="font-size:12.5px;color:var(--accent2)">+ feature-specific guidance</div>`
+      : `<div style="font-size:12.5px;color:var(--muted)">Uses the base prompt as-is</div>`;
     const card = document.createElement('div'); card.className = 'feature-card';
-    card.innerHTML = `<div class="fc-name">${esc(f.name)}</div><div class="fc-doc">${doc}</div>
+    card.innerHTML = `<div class="fc-name">${esc(f.name)}</div><div class="fc-doc">${doc}</div>${guidance}
       <div class="fc-actions"><button class="btn-ghost" data-edit="${f.id}">Edit</button><button class="btn-danger" data-del="${f.id}">Delete</button></div>`;
     grid.appendChild(card);
   });
@@ -153,7 +142,7 @@ function openModal(id) {
   document.getElementById('f-id').value = f ? f.id : '';
   document.getElementById('f-name').value = f ? f.name : '';
   document.getElementById('f-doc').value = f && f.documentation_url ? f.documentation_url : '';
-  document.getElementById('f-prompt').value = f && f.fit_prompt ? f.fit_prompt : defaultPrompt;
+  document.getElementById('f-additional').value = f && f.additional_prompt ? f.additional_prompt : '';
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('f-name').focus();
 }
@@ -163,7 +152,7 @@ async function save() {
   const payload = {
     name: document.getElementById('f-name').value.trim(),
     documentation_url: document.getElementById('f-doc').value.trim(),
-    fit_prompt: document.getElementById('f-prompt').value.trim(),
+    additional_prompt: document.getElementById('f-additional').value.trim(),
   };
   if (!payload.name) { showError('Name is required.'); return; }
   if (!payload.documentation_url) { showError('A documentation URL is required.'); return; }
@@ -183,7 +172,7 @@ async function del(id) {
 }
 document.getElementById('modal-backdrop').addEventListener('click', e => { if (e.target.id === 'modal-backdrop') closeModal(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
-Promise.all([loadFeatures(), loadDefault()]).catch(err => { console.error(err); document.getElementById('list').innerHTML = '<div class="empty-state"><h2>Couldn\'t load features</h2><p>Check the server logs.</p></div>'; });
+loadFeatures().catch(err => { console.error(err); document.getElementById('list').innerHTML = '<div class="empty-state"><h2>Couldn\'t load features</h2><p>Check the server logs.</p></div>'; });
 </script>
 </body>
 </html>

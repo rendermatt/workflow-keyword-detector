@@ -23,9 +23,10 @@
     textarea { width: 100%; min-height: 420px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; line-height: 1.6; padding: 14px; resize: vertical; }
     textarea:focus { outline: none; border-color: var(--accent); }
-    .placeholders { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
-    .ph { font-family: ui-monospace, Menlo, monospace; font-size: 12px; background: var(--surface2);
-      border: 1px solid var(--border); border-radius: 6px; padding: 3px 8px; color: var(--accent2); }
+    .ph-list { display: flex; flex-direction: column; gap: 10px; margin: 14px 0 4px; }
+    .ph-list dt { font-family: ui-monospace, Menlo, monospace; font-size: 12px; color: var(--accent2); }
+    .ph-list dd { color: var(--muted); font-size: 13px; margin-top: 2px; line-height: 1.5; }
+    .ph-list dd strong { color: var(--text); }
     .callout { border-left: 3px solid var(--accent); background: var(--surface2); border-radius: 0 8px 8px 0; padding: 12px 16px; margin-bottom: 18px; color: var(--text); font-size: 13px; }
     .actions { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
     button { font-family: inherit; font-size: 13px; cursor: pointer; border-radius: 8px; border: 1px solid transparent; padding: 9px 16px; }
@@ -49,16 +50,17 @@
   </nav>
 </header>
 <div class="container">
-  <h2>Default Fit Prompt</h2>
-  <p class="subtitle">The starting prompt new features inherit (and the fallback for any feature without its own). To change how a <em>specific</em> feature is judged, edit that feature's prompt on the <a href="/features" style="color:var(--accent2)">Features</a> page — this default doesn't overwrite prompts features already have.</p>
+  <h2>Base Fit Prompt</h2>
+  <p class="subtitle">The single prompt sent to Claude for <em>every</em> assessment. It owns the placeholders, the scoring scale, and the output format. Per-feature nuance is added through each feature's <a href="/features" style="color:var(--accent2)">Additional guidance</a> field, which is injected at <code style="background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:0 5px">{% raw %}{{FEATURE_INSTRUCTIONS}}{% endraw %}</code>.</p>
   <div class="panel">
-    <div class="callout">The placeholders below are filled in automatically for each company before the prompt is sent. Keep them in the text so the model gets the feature docs and the crawled content.</div>
-    <div class="placeholders" id="placeholders">{% raw %}
-      <span class="ph">{{FEATURE_NAME}}</span>
-      <span class="ph">{{FEATURE_DOCUMENTATION}}</span>
-      <span class="ph">{{CUSTOMER_DOMAIN}}</span>
-      <span class="ph">{{CRAWLED_CONTENT}}</span>
-    {% endraw %}</div>
+    <div class="callout">These placeholders are filled in automatically before each request. Keep the ones you want the model to see.</div>
+    <dl class="ph-list" id="placeholders">{% raw %}
+      <div><dt>{{FEATURE_NAME}}</dt><dd>The feature's name.</dd></div>
+      <div><dt>{{FEATURE_DOCUMENTATION}}</dt><dd>Visible text from the feature's documentation URL — that one page — fetched once per crawl.</dd></div>
+      <div><dt>{{FEATURE_INSTRUCTIONS}}</dt><dd>This feature's <strong>Additional guidance</strong> field (a short note is inserted when a feature has none).</dd></div>
+      <div><dt>{{CUSTOMER_DOMAIN}}</dt><dd>The company's root domain being assessed.</dd></div>
+      <div><dt>{{CRAWLED_CONTENT}}</dt><dd>The combined visible text of <strong>every page crawled on that one company's site</strong>, each section headed by its URL — <strong>not a single page</strong>. Gathered from up to 50 pages and capped at ~60,000 characters total. One fit assessment is produced per company from this whole bundle (not one per page).</dd></div>
+    {% endraw %}</dl>
     <label for="prompt" style="margin-top:16px">Prompt template</label>
     <textarea id="prompt" placeholder="Loading…"></textarea>
     <div class="actions">
@@ -84,7 +86,7 @@ async function save() {
     const res = await fetch('/api/settings/prompt', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { setStatus(data.error || 'Failed to save.', 'err'); return; }
-    setStatus('Saved. New features will start from this prompt.', 'ok');
+    setStatus('Saved. New crawls will use this base prompt.', 'ok');
   } catch (e) { console.error(e); setStatus('Failed to save.', 'err'); }
   finally { btn.disabled = false; }
 }
