@@ -349,31 +349,60 @@ def _generate_keywords(feature_name: str, doc_content: str, template: str) -> li
 
 
 def _resolve_keywords(feature: dict, doc_content: str) -> list[str]:
-    """Return the feature's scrape keywords, generating them only when the docs
-    or the keyword prompt have changed (cached like the documentation brief)."""
+    """Return the feature's scrape keywords. Keywords are sticky: once a feature
+    has any — auto-generated or hand-edited in the dashboard — they're reused
+    verbatim. They're only (re)generated when the field is empty."""
     existing = feature.get("keywords")
-    if not doc_content.strip():
-        return existing or []
-    kw_template = get_setting("keyword_prompt") or KEYWORD_PROMPT
-    content_hash = hashlib.sha256(
-        (kw_template + "\x00" + doc_content).encode("utf-8")
-    ).hexdigest()
-    if existing is not None and feature.get("keywords_hash") == content_hash:
-        logger.info("Reusing cached keywords for feature %s", feature["id"])
+    if existing:
+        logger.info("Using existing keywords for feature %s", feature["id"])
         return existing
+    if not doc_content.strip():
+        return []
+    kw_template = get_setting("keyword_prompt") or KEYWORD_PROMPT
     try:
         keywords = _generate_keywords(feature["name"], doc_content, kw_template)
     except Exception:
-        logger.exception("Keyword generation failed; keeping any existing keywords")
-        return existing or []
-    save_keywords(feature["id"], keywords, content_hash)
+        logger.exception("Keyword generation failed")
+        return []
+    save_keywords(feature["id"], keywords)
     logger.info("Generated %d keywords for feature %s", len(keywords), feature["id"])
     return keywords
 
 
+def _allocate_char_budget(lengths: list[int], budget: int) -> list[int]:
+    """Split a total character budget across pages so every page gets a fair
+    share and none is dropped. Water-filling: each round gives every still-hungry
+    page an equal slice of the remaining budget, capped at its actual length, so
+    short pages take only what they need and the slack flows to longer pages.
+    """
+    n = len(lengths)
+    allocs = [0] * n
+    if n == 0 or budget <= 0:
+        return allocs
+    hungry = [i for i in range(n) if lengths[i] > 0]
+    remaining = budget
+    while remaining > 0 and hungry:
+        share = max(1, remaining // len(hungry))
+        still = []
+        for i in hungry:
+            give = min(share, lengths[i] - allocs[i], remaining)
+            allocs[i] += give
+            remaining -= give
+            if allocs[i] < lengths[i] and remaining > 0:
+                still.append(i)
+            if remaining <= 0:
+                break
+        if len(still) == len(hungry) and share == 0:
+            break  # budget < number of hungry pages; can't split further
+        hungry = still
+    return allocs
+
+
 def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]) -> dict:
     """Crawl a seed URL and same-domain links (BFS), recording coverage in
-    crawled_pages and accumulating visible page text up to CRAWL_CONTENT_CHARS.
+    crawled_pages and gathering visible page text. The CRAWL_CONTENT_CHARS budget
+    is divided fairly across all crawled pages (see _allocate_char_budget) so no
+    page is dropped just because earlier pages were long.
 
     Returns {domain, pages_crawled, pages_ok, pages_skipped_robots, text,
     keyword_counts}.
@@ -389,13 +418,14 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
     pages_crawled = 0
     pages_ok = 0
     pages_skipped_robots = 0
-    chunks: list[str] = []
-    total_chars = 0
     # Case-insensitive substring counts across the whole site, per keyword.
     lowered_keywords = [(kw, kw.lower()) for kw in keywords if kw.strip()]
     keyword_counts: dict[str, int] = {}
+    # (url, visible text, status) for each HTML page — trimmed to the LLM budget
+    # once all pages are known, so the budget is shared fairly across them.
+    pages: list[tuple[str, str, int]] = []
 
-    while queue and pages_crawled < CRAWL_MAX_PAGES and total_chars < CRAWL_CONTENT_CHARS:
+    while queue and pages_crawled < CRAWL_MAX_PAGES:
         url = queue.popleft()
 
         if not _robots_allows(session, url, robots_cache):
@@ -433,22 +463,19 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
             continue
 
         text, soup = _visible_text(response.text)
-        record_page(run_id, feature_id, base, url, ok=True, status_code=status)
         pages_ok += 1
 
-        if text:
-            # Count keywords on the full page text (independent of the LLM budget).
-            if lowered_keywords:
-                lowered = text.lower()
-                for kw, kwl in lowered_keywords:
-                    c = lowered.count(kwl)
-                    if c:
-                        keyword_counts[kw] = keyword_counts.get(kw, 0) + c
+        # Count keywords on the full page text (independent of the LLM budget).
+        if text and lowered_keywords:
+            lowered = text.lower()
+            for kw, kwl in lowered_keywords:
+                c = lowered.count(kwl)
+                if c:
+                    keyword_counts[kw] = keyword_counts.get(kw, 0) + c
 
-            remaining = CRAWL_CONTENT_CHARS - total_chars
-            snippet = text[:remaining]
-            chunks.append(f"\n\n## {url}\n{snippet}")
-            total_chars += len(snippet) + len(url) + 5
+        # Defer recording coverage (and the per-page char count) until the budget
+        # is split below. Store at most a whole budget's worth to bound memory.
+        pages.append((url, (text or "")[:CRAWL_CONTENT_CHARS], status))
 
         for link in _extract_links(soup, url):
             if (
@@ -459,10 +486,24 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
                 enqueued.add(link)
                 queue.append(link)
 
+    # Share the budget across pages, then build the bundle and record per-page
+    # coverage with how many characters each page contributed.
+    allocs = _allocate_char_budget([len(t) for _, t, _ in pages], CRAWL_CONTENT_CHARS)
+    chunks: list[str] = []
+    total_chars = 0
+    for (url, text, status), n_chars in zip(pages, allocs):
+        snippet = text[:n_chars]
+        chunks.append(f"\n\n## {url}\n{snippet}")
+        total_chars += len(snippet)
+        record_page(
+            run_id, feature_id, base, url, ok=True,
+            status_code=status, content_chars=len(snippet),
+        )
+
     logger.info(
         f"Crawled {pages_crawled} pages for {base} "
         f"({pages_ok} ok, {pages_skipped_robots} skipped by robots.txt, "
-        f"{total_chars} chars gathered)"
+        f"{total_chars} chars gathered across {len(pages)} pages)"
     )
     return {
         "domain": base,

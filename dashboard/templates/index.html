@@ -95,6 +95,7 @@
     table.pages { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 6px; }
     table.pages th { text-align: left; padding: 6px 10px; color: var(--muted); font-weight: 500; border-bottom: 1px solid var(--border); }
     table.pages td { padding: 6px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    table.pages th.num, table.pages td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--muted); }
     table.pages a { color: var(--text); text-decoration: none; word-break: break-all; }
     table.pages a:hover { color: var(--accent2); text-decoration: underline; }
     .status-ok { color: var(--accent2); } .status-err { color: var(--unlikely); }
@@ -401,10 +402,11 @@ async function openDetail(i) {
     else if (p.blocked_reason) status = `<span class="status-err">403 (${esc(p.blocked_reason)})</span>`;
     else if (p.ok) status = `<span class="status-ok">${p.status_code || 'ok'}</span>`;
     else status = `<span class="status-err">${p.status_code || 'error'}</span>`;
-    return `<tr><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(path)}</a></td><td>${status}</td></tr>`;
+    const chars = p.content_chars != null ? `${fmtChars(p.content_chars)} chars` : '—';
+    return `<tr><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(path)}</a></td><td class="num">${chars}</td><td>${status}</td></tr>`;
   }).join('');
   pc.innerHTML = `<details open><summary>${pages.length} page${pages.length === 1 ? '' : 's'} crawled</summary>
-    <table class="pages"><thead><tr><th>Path</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></details>`;
+    <table class="pages"><thead><tr><th>Path</th><th class="num">Sent</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
 function closeDetail() { document.getElementById('detail-modal').classList.remove('open'); }

@@ -104,9 +104,9 @@
         <textarea id="f-brief" class="brief-box" placeholder="Not generated yet — created on the first crawl. You can also write one here to use instead."></textarea>
       </div>
       <div class="field" id="kw-field" style="display:none">
-        <label>Keywords <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(auto-generated, read-only)</span></label>
-        <div class="hint" style="margin-top:0;margin-bottom:6px">Generated from the docs with the <a href="/prompt" style="color:var(--accent2)">keyword prompt</a> and counted on each crawl — see the heatmap on the dashboard.</div>
-        <div class="placeholders" id="f-keywords-view"></div>
+        <label>Keywords <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(editable)</span></label>
+        <div class="hint" style="margin-top:0;margin-bottom:6px">Generated from the docs with the <a href="/prompt" style="color:var(--accent2)">keyword prompt</a> and counted on each crawl (see the heatmap). Comma- or newline-separated. If filled they're used as-is; clear the box to regenerate on the next crawl.</div>
+        <textarea id="f-keywords" style="min-height:110px" placeholder="Generated on the first crawl. You can also enter keywords here — one per line or comma-separated."></textarea>
       </div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
@@ -119,6 +119,12 @@
 <script>
 let features = [];
 let origBrief = '';
+let origKeywords = '';
+function parseKeywords(raw) {
+  const seen = new Set(), out = [];
+  (raw || '').split(/[\n,]/).forEach(k => { const t = k.trim(); if (t && !seen.has(t.toLowerCase())) { seen.add(t.toLowerCase()); out.push(t); } });
+  return out;
+}
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
 async function loadFeatures() { features = await fetch('/api/features').then(r => r.json()); render(); }
@@ -168,11 +174,14 @@ function openModal(id) {
     origBrief = '';
   }
   const kwField = document.getElementById('kw-field');
-  if (f && f.keywords && f.keywords.length) {
+  const kwBox = document.getElementById('f-keywords');
+  if (f) {
     kwField.style.display = 'block';
-    document.getElementById('f-keywords-view').innerHTML = f.keywords.map(k => `<span class="ph">${esc(k)}</span>`).join('');
+    kwBox.value = (f.keywords || []).join(', ');
+    origKeywords = kwBox.value;
   } else {
     kwField.style.display = 'none';
+    origKeywords = '';
   }
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('f-name').focus();
@@ -191,6 +200,8 @@ async function save() {
   // fields doesn't freeze an auto-generated brief as a manual override.
   const briefVal = document.getElementById('f-brief').value.trim();
   if (id && briefVal !== origBrief.trim()) payload.doc_brief = briefVal;
+  const kwVal = document.getElementById('f-keywords').value;
+  if (id && kwVal.trim() !== origKeywords.trim()) payload.keywords = parseKeywords(kwVal);
   const btn = document.getElementById('save-btn'); btn.disabled = true;
   try {
     const res = await fetch(id ? `/api/features/${id}` : '/api/features', { method: id ? 'PUT' : 'POST',

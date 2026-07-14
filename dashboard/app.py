@@ -49,7 +49,6 @@ def init_schema() -> None:
                     doc_brief         TEXT,
                     doc_brief_hash    TEXT,
                     keywords          JSONB,
-                    keywords_hash     TEXT,
                     created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
@@ -60,7 +59,6 @@ def init_schema() -> None:
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief TEXT")
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief_hash TEXT")
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS keywords JSONB")
-            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS keywords_hash TEXT")
 
             # Crawl coverage (also created by the workflow's db.init_db); ensured
             # here so the dashboard works before the first crawl runs. The
@@ -77,12 +75,14 @@ def init_schema() -> None:
                     ok             BOOLEAN     NOT NULL DEFAULT TRUE,
                     status_code    INTEGER,
                     blocked_reason TEXT,
+                    content_chars  INTEGER,
                     crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
                 )
             """)
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
+            cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS content_chars INTEGER")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
             cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
@@ -301,7 +301,7 @@ def api_domain_pages(domain):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT url, ok, status_code, blocked_reason, crawled_at
+                SELECT url, ok, status_code, blocked_reason, content_chars, crawled_at
                 FROM crawled_pages
                 WHERE feature_id = %s AND domain = %s
                 ORDER BY url
@@ -483,6 +483,28 @@ def api_update_feature(feature_id):
                 else:
                     cur.execute(
                         "UPDATE features SET doc_brief = NULL, doc_brief_hash = NULL WHERE id = %s",
+                        (feature_id,),
+                    )
+
+            # Keywords are sticky: a non-empty list is used as-is on later crawls;
+            # clearing them lets the workflow regenerate on the next crawl. Only
+            # present in the payload when the user changed the field.
+            if "keywords" in data:
+                raw = data.get("keywords") or []
+                seen, cleaned = set(), []
+                for k in raw if isinstance(raw, list) else []:
+                    v = k.strip() if isinstance(k, str) else ""
+                    if v and v.lower() not in seen:
+                        seen.add(v.lower())
+                        cleaned.append(v)
+                if cleaned:
+                    cur.execute(
+                        "UPDATE features SET keywords = %s WHERE id = %s",
+                        (psycopg2.extras.Json(cleaned), feature_id),
+                    )
+                else:
+                    cur.execute(
+                        "UPDATE features SET keywords = NULL WHERE id = %s",
                         (feature_id,),
                     )
     return jsonify(id=feature_id)

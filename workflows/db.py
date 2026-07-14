@@ -46,6 +46,7 @@ def init_db() -> None:
                 ok             BOOLEAN     NOT NULL DEFAULT TRUE,
                 status_code    INTEGER,
                 blocked_reason TEXT,                   -- e.g. 'cf-mitigated' / 'robots-disallowed'
+                content_chars  INTEGER,                -- chars of this page sent to the model
                 crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
             )
@@ -55,6 +56,7 @@ def init_db() -> None:
         # above is a no-op, so the columns won't exist yet.
         cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
         cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
+        cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS content_chars INTEGER")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
         cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
@@ -124,7 +126,6 @@ def init_db() -> None:
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief TEXT")
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief_hash TEXT")
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS keywords JSONB")
-            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS keywords_hash TEXT")
     logger.info("Database ready")
 
 
@@ -134,7 +135,7 @@ def get_feature(feature_id: int) -> dict | None:
     with _cursor() as cur:
         cur.execute(
             "SELECT id, name, documentation_url, additional_prompt, doc_brief, doc_brief_hash, "
-            "keywords, keywords_hash FROM features WHERE id = %s",
+            "keywords FROM features WHERE id = %s",
             (feature_id,),
         )
         row = cur.fetchone()
@@ -148,7 +149,6 @@ def get_feature(feature_id: int) -> dict | None:
             "doc_brief": row[4],
             "doc_brief_hash": row[5],
             "keywords": row[6],
-            "keywords_hash": row[7],
         }
 
 
@@ -162,12 +162,12 @@ def save_doc_brief(feature_id: int, brief: str, content_hash: str) -> None:
         )
 
 
-def save_keywords(feature_id: int, keywords: list[str], content_hash: str) -> None:
-    """Cache the generated keyword list and the hash it was derived from."""
+def save_keywords(feature_id: int, keywords: list[str]) -> None:
+    """Persist a feature's keyword list (used-as-is on later crawls)."""
     with _cursor() as cur:
         cur.execute(
-            "UPDATE features SET keywords = %s, keywords_hash = %s WHERE id = %s",
-            (psycopg2.extras.Json(keywords), content_hash, feature_id),
+            "UPDATE features SET keywords = %s WHERE id = %s",
+            (psycopg2.extras.Json(keywords), feature_id),
         )
 
 
@@ -207,23 +207,25 @@ def record_page(
     ok: bool,
     status_code: int | None,
     blocked_reason: str | None = None,
+    content_chars: int | None = None,
 ) -> None:
     """Upsert a crawled page into crawled_pages for a feature."""
     with _cursor() as cur:
         cur.execute(
             """
             INSERT INTO crawled_pages
-                (run_id, feature_id, domain, url, ok, status_code, blocked_reason)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (run_id, feature_id, domain, url, ok, status_code, blocked_reason, content_chars)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT ON CONSTRAINT crawled_pages_feature_url_key DO UPDATE
                 SET run_id         = EXCLUDED.run_id,
                     domain         = EXCLUDED.domain,
                     ok             = EXCLUDED.ok,
                     status_code    = EXCLUDED.status_code,
                     blocked_reason = EXCLUDED.blocked_reason,
+                    content_chars  = EXCLUDED.content_chars,
                     crawled_at     = NOW()
             """,
-            (run_id, feature_id, domain, url, ok, status_code, blocked_reason),
+            (run_id, feature_id, domain, url, ok, status_code, blocked_reason, content_chars),
         )
 
 
