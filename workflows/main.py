@@ -421,9 +421,9 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
     # Case-insensitive substring counts across the whole site, per keyword.
     lowered_keywords = [(kw, kw.lower()) for kw in keywords if kw.strip()]
     keyword_counts: dict[str, int] = {}
-    # (url, visible text, status) for each HTML page — trimmed to the LLM budget
-    # once all pages are known, so the budget is shared fairly across them.
-    pages: list[tuple[str, str, int]] = []
+    # (url, visible text (capped for memory), status, full length) for each HTML
+    # page — the budget is shared fairly across them once all pages are known.
+    pages: list[tuple[str, str, int, int]] = []
 
     while queue and pages_crawled < CRAWL_MAX_PAGES:
         url = queue.popleft()
@@ -474,8 +474,10 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
                     keyword_counts[kw] = keyword_counts.get(kw, 0) + c
 
         # Defer recording coverage (and the per-page char count) until the budget
-        # is split below. Store at most a whole budget's worth to bound memory.
-        pages.append((url, (text or "")[:CRAWL_CONTENT_CHARS], status))
+        # is split below. Keep the full length for reporting; store at most a
+        # whole budget's worth of text to bound memory.
+        full_text = text or ""
+        pages.append((url, full_text[:CRAWL_CONTENT_CHARS], status, len(full_text)))
 
         for link in _extract_links(soup, url):
             if (
@@ -487,23 +489,26 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
                 queue.append(link)
 
     # Share the budget across pages, then build the bundle and record per-page
-    # coverage with how many characters each page contributed.
-    allocs = _allocate_char_budget([len(t) for _, t, _ in pages], CRAWL_CONTENT_CHARS)
+    # coverage with how many characters each page contributed (sent) out of its
+    # full visible-text length (total).
+    allocs = _allocate_char_budget([len(t) for _, t, _, _ in pages], CRAWL_CONTENT_CHARS)
     chunks: list[str] = []
-    total_chars = 0
-    for (url, text, status), n_chars in zip(pages, allocs):
+    sent_chars = 0
+    total_available = 0
+    for (url, text, status, full_len), n_chars in zip(pages, allocs):
         snippet = text[:n_chars]
         chunks.append(f"\n\n## {url}\n{snippet}")
-        total_chars += len(snippet)
+        sent_chars += len(snippet)
+        total_available += full_len
         record_page(
-            run_id, feature_id, base, url, ok=True,
-            status_code=status, content_chars=len(snippet),
+            run_id, feature_id, base, url, ok=True, status_code=status,
+            content_chars=len(snippet), total_chars=full_len,
         )
 
     logger.info(
         f"Crawled {pages_crawled} pages for {base} "
         f"({pages_ok} ok, {pages_skipped_robots} skipped by robots.txt, "
-        f"{total_chars} chars gathered across {len(pages)} pages)"
+        f"{sent_chars}/{total_available} chars sent across {len(pages)} pages)"
     )
     return {
         "domain": base,
@@ -512,6 +517,8 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]
         "pages_skipped_robots": pages_skipped_robots,
         "text": "".join(chunks).strip(),
         "keyword_counts": keyword_counts,
+        "sent_chars": sent_chars,
+        "total_chars": total_available,
     }
 
 
@@ -626,7 +633,8 @@ def assess_domain(
         "feature_id": feature_id,
         "domain": domain,
         "pages_analyzed": crawl["pages_ok"],
-        "content_chars": len(crawl["text"]),
+        "content_chars": crawl["sent_chars"],
+        "total_chars": crawl["total_chars"],
     }
     try:
         assessment.update(

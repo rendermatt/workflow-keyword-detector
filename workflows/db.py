@@ -47,6 +47,7 @@ def init_db() -> None:
                 status_code    INTEGER,
                 blocked_reason TEXT,                   -- e.g. 'cf-mitigated' / 'robots-disallowed'
                 content_chars  INTEGER,                -- chars of this page sent to the model
+                total_chars    INTEGER,                -- full visible-text length of the page
                 crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
             )
@@ -57,6 +58,7 @@ def init_db() -> None:
         cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
         cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
         cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS content_chars INTEGER")
+        cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS total_chars INTEGER")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
         cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
@@ -82,12 +84,14 @@ def init_db() -> None:
                 model          TEXT,
                 pages_analyzed INTEGER,
                 content_chars  INTEGER,
+                total_chars    INTEGER,
                 error          TEXT,
                 assessed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT fit_assessments_feature_domain_key UNIQUE (feature_id, domain)
             )
         """)
         cur.execute("ALTER TABLE fit_assessments ADD COLUMN IF NOT EXISTS content_chars INTEGER")
+        cur.execute("ALTER TABLE fit_assessments ADD COLUMN IF NOT EXISTS total_chars INTEGER")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_fit_assessments_feature ON fit_assessments (feature_id)"
         )
@@ -208,14 +212,16 @@ def record_page(
     status_code: int | None,
     blocked_reason: str | None = None,
     content_chars: int | None = None,
+    total_chars: int | None = None,
 ) -> None:
     """Upsert a crawled page into crawled_pages for a feature."""
     with _cursor() as cur:
         cur.execute(
             """
             INSERT INTO crawled_pages
-                (run_id, feature_id, domain, url, ok, status_code, blocked_reason, content_chars)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                (run_id, feature_id, domain, url, ok, status_code, blocked_reason,
+                 content_chars, total_chars)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT ON CONSTRAINT crawled_pages_feature_url_key DO UPDATE
                 SET run_id         = EXCLUDED.run_id,
                     domain         = EXCLUDED.domain,
@@ -223,9 +229,11 @@ def record_page(
                     status_code    = EXCLUDED.status_code,
                     blocked_reason = EXCLUDED.blocked_reason,
                     content_chars  = EXCLUDED.content_chars,
+                    total_chars    = EXCLUDED.total_chars,
                     crawled_at     = NOW()
             """,
-            (run_id, feature_id, domain, url, ok, status_code, blocked_reason, content_chars),
+            (run_id, feature_id, domain, url, ok, status_code, blocked_reason,
+             content_chars, total_chars),
         )
 
 
@@ -236,8 +244,9 @@ def save_fit_assessment(assessment: dict) -> None:
             """
             INSERT INTO fit_assessments
                 (run_id, feature_id, domain, fit_score, tier, summary,
-                 signals, recommendation, model, pages_analyzed, content_chars, error)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 signals, recommendation, model, pages_analyzed, content_chars,
+                 total_chars, error)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT ON CONSTRAINT fit_assessments_feature_domain_key DO UPDATE
                 SET run_id         = EXCLUDED.run_id,
                     fit_score      = EXCLUDED.fit_score,
@@ -248,6 +257,7 @@ def save_fit_assessment(assessment: dict) -> None:
                     model          = EXCLUDED.model,
                     pages_analyzed = EXCLUDED.pages_analyzed,
                     content_chars  = EXCLUDED.content_chars,
+                    total_chars    = EXCLUDED.total_chars,
                     error          = EXCLUDED.error,
                     assessed_at    = NOW()
             """,
@@ -263,6 +273,7 @@ def save_fit_assessment(assessment: dict) -> None:
                 assessment.get("model"),
                 assessment.get("pages_analyzed"),
                 assessment.get("content_chars"),
+                assessment.get("total_chars"),
                 assessment.get("error"),
             ),
         )

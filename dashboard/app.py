@@ -76,6 +76,7 @@ def init_schema() -> None:
                     status_code    INTEGER,
                     blocked_reason TEXT,
                     content_chars  INTEGER,
+                    total_chars    INTEGER,
                     crawled_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     CONSTRAINT crawled_pages_feature_url_key UNIQUE (feature_id, url)
                 )
@@ -83,6 +84,7 @@ def init_schema() -> None:
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS feature_id INTEGER")
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS blocked_reason TEXT")
             cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS content_chars INTEGER")
+            cur.execute("ALTER TABLE crawled_pages ADD COLUMN IF NOT EXISTS total_chars INTEGER")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_feature ON crawled_pages (feature_id)")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_crawled_pages_domain ON crawled_pages (domain)")
             cur.execute("ALTER TABLE crawled_pages DROP CONSTRAINT IF EXISTS crawled_pages_url_key")
@@ -107,12 +109,14 @@ def init_schema() -> None:
                     model          TEXT,
                     pages_analyzed INTEGER,
                     content_chars  INTEGER,
+                    total_chars    INTEGER,
                     error          TEXT,
                     assessed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     CONSTRAINT fit_assessments_feature_domain_key UNIQUE (feature_id, domain)
                 )
             """)
             cur.execute("ALTER TABLE fit_assessments ADD COLUMN IF NOT EXISTS content_chars INTEGER")
+            cur.execute("ALTER TABLE fit_assessments ADD COLUMN IF NOT EXISTS total_chars INTEGER")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_fit_assessments_feature ON fit_assessments (feature_id)")
 
             cur.execute("""
@@ -250,7 +254,7 @@ def api_fit():
         with conn.cursor() as cur:
             cur.execute("""
                 SELECT domain, fit_score, tier, summary, signals, recommendation,
-                       pages_analyzed, content_chars, model, error, assessed_at
+                       pages_analyzed, content_chars, total_chars, model, error, assessed_at
                 FROM fit_assessments
                 WHERE feature_id = %s
                 ORDER BY fit_score DESC NULLS LAST, domain
@@ -301,7 +305,7 @@ def api_domain_pages(domain):
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT url, ok, status_code, blocked_reason, content_chars, crawled_at
+                SELECT url, ok, status_code, blocked_reason, content_chars, total_chars, crawled_at
                 FROM crawled_pages
                 WHERE feature_id = %s AND domain = %s
                 ORDER BY url

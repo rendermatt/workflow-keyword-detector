@@ -239,10 +239,14 @@ const TIER_LABELS = { strong: 'Strong (75-100)', promising: 'Promising (50-74)',
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
 function fmtChars(n) { if (n == null) return ''; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); }
+function fmtSentTotal(sent, total) {
+  if (sent == null) return '';
+  return total != null ? `${fmtChars(sent)} / ${fmtChars(total)}` : `${fmtChars(sent)}`;
+}
 function coverageText(f) {
   const parts = [];
   if (f.pages_analyzed != null) parts.push(`${f.pages_analyzed} page${f.pages_analyzed === 1 ? '' : 's'}`);
-  if (f.content_chars != null) parts.push(`${fmtChars(f.content_chars)} chars`);
+  if (f.content_chars != null) parts.push(`${fmtSentTotal(f.content_chars, f.total_chars)} chars`);
   return parts.join(' · ');
 }
 function scoreColor(s) { const h = Math.max(0, Math.min(120, (s / 100) * 120)); return `hsl(${h}, 65%, 48%)`; }
@@ -402,11 +406,11 @@ async function openDetail(i) {
     else if (p.blocked_reason) status = `<span class="status-err">403 (${esc(p.blocked_reason)})</span>`;
     else if (p.ok) status = `<span class="status-ok">${p.status_code || 'ok'}</span>`;
     else status = `<span class="status-err">${p.status_code || 'error'}</span>`;
-    const chars = p.content_chars != null ? `${fmtChars(p.content_chars)} chars` : '—';
+    const chars = p.content_chars != null ? fmtSentTotal(p.content_chars, p.total_chars) : '—';
     return `<tr><td><a href="${esc(p.url)}" target="_blank" rel="noopener">${esc(path)}</a></td><td class="num">${chars}</td><td>${status}</td></tr>`;
   }).join('');
   pc.innerHTML = `<details open><summary>${pages.length} page${pages.length === 1 ? '' : 's'} crawled</summary>
-    <table class="pages"><thead><tr><th>Path</th><th class="num">Sent</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></details>`;
+    <table class="pages"><thead><tr><th>Path</th><th class="num" title="characters sent to the model / full page length">Sent / total</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
 function closeDetail() { document.getElementById('detail-modal').classList.remove('open'); }
