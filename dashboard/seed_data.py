@@ -97,3 +97,25 @@ with no preamble.
 <documentation>
 {{DOCUMENTATION}}
 </documentation>"""
+
+
+# The global keyword-generation prompt. Like the distillation prompt it's the
+# same for every feature and takes the fetched documentation as input; it's run
+# once per crawl (cached until the docs or this prompt change) to produce the
+# keywords the crawler counts on each prospect site.
+#
+# Placeholders:
+#   {{FEATURE_NAME}}    the feature's name
+#   {{DOCUMENTATION}}   visible text fetched from the feature's documentation URL
+DEFAULT_KEYWORD_PROMPT = """\
+Generate a CSV with a single column "keyword" of terms I should scrape a company's \
+website for to see whether they would be a good fit for the "{{FEATURE_NAME}}" \
+feature, based on the documentation below. Favor concrete, distinctive terms \
+(product names, technologies, use cases) over generic words.
+
+Output only the CSV: a "keyword" header on the first line, then one keyword per \
+line — no explanation and no code fences.
+
+<documentation>
+{{DOCUMENTATION}}
+</documentation>"""

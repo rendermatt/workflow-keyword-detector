@@ -103,6 +103,11 @@
         <div class="hint" style="margin-top:0;margin-bottom:6px">Distilled from the documentation URL with one LLM call and sent to the model in place of the full docs. Edit to override it — your version is then used as-is. Clear the box to have it auto-regenerate on the next crawl.</div>
         <textarea id="f-brief" class="brief-box" placeholder="Not generated yet — created on the first crawl. You can also write one here to use instead."></textarea>
       </div>
+      <div class="field" id="kw-field" style="display:none">
+        <label>Keywords <span style="text-transform:none;letter-spacing:0;color:var(--muted)">(auto-generated, read-only)</span></label>
+        <div class="hint" style="margin-top:0;margin-bottom:6px">Generated from the docs with the <a href="/prompt" style="color:var(--accent2)">keyword prompt</a> and counted on each crawl — see the heatmap on the dashboard.</div>
+        <div class="placeholders" id="f-keywords-view"></div>
+      </div>
       <div class="modal-actions">
         <button type="button" class="btn-ghost" onclick="closeModal()">Cancel</button>
         <button type="button" class="btn-primary" id="save-btn" onclick="save()">Save Feature</button>
@@ -132,8 +137,10 @@ function render() {
     const guidance = f.additional_prompt
       ? `<div style="font-size:12.5px;color:var(--accent2)">+ feature-specific guidance</div>`
       : `<div style="font-size:12.5px;color:var(--muted)">Uses the base prompt as-is</div>`;
+    const nkw = (f.keywords && f.keywords.length) || 0;
+    const kwCount = `<div style="font-size:12.5px;color:var(--muted)">${nkw ? `${nkw} keyword${nkw === 1 ? '' : 's'} generated` : 'Keywords generated on first crawl'}</div>`;
     const card = document.createElement('div'); card.className = 'feature-card';
-    card.innerHTML = `<div class="fc-name">${esc(f.name)}</div><div class="fc-doc">${doc}</div>${guidance}
+    card.innerHTML = `<div class="fc-name">${esc(f.name)}</div><div class="fc-doc">${doc}</div>${guidance}${kwCount}
       <div class="fc-actions"><button class="btn-ghost" data-edit="${f.id}">Edit</button><button class="btn-danger" data-del="${f.id}">Delete</button></div>`;
     grid.appendChild(card);
   });
@@ -159,6 +166,13 @@ function openModal(id) {
   } else {
     briefField.style.display = 'none';
     origBrief = '';
+  }
+  const kwField = document.getElementById('kw-field');
+  if (f && f.keywords && f.keywords.length) {
+    kwField.style.display = 'block';
+    document.getElementById('f-keywords-view').innerHTML = f.keywords.map(k => `<span class="ph">${esc(k)}</span>`).join('');
+  } else {
+    kwField.style.display = 'none';
   }
   document.getElementById('modal-backdrop').classList.add('open');
   document.getElementById('f-name').focus();

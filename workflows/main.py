@@ -20,6 +20,8 @@ from db import (
     record_page,
     save_doc_brief,
     save_fit_assessment,
+    save_keyword_hits,
+    save_keywords,
 )
 
 logging.basicConfig(level=logging.WARNING)
@@ -107,6 +109,20 @@ Cover, in this order:
 
 Be specific and compact — aim for under ~400 words. Output the brief as plain text \
 with no preamble.
+
+<documentation>
+{{DOCUMENTATION}}
+</documentation>"""
+
+# Fallback for the editable global keyword-generation prompt (app_settings key
+# 'keyword_prompt'). Same for every feature — only {{DOCUMENTATION}} differs.
+KEYWORD_PROMPT = """\
+Generate a CSV with a single column "keyword" of terms I should scrape a company's \
+website for to see whether they would be a good fit for the "{{FEATURE_NAME}}" \
+feature, based on the documentation below.
+
+Output only the CSV: a "keyword" header on the first line, then one keyword per \
+line — no explanation and no code fences.
 
 <documentation>
 {{DOCUMENTATION}}
@@ -297,11 +313,70 @@ def _resolve_doc_brief(feature: dict, doc_content: str) -> str:
     return brief
 
 
-def _crawl_site(seed_url: str, run_id: str, feature_id: int) -> dict:
+def _parse_keyword_csv(text: str) -> list[str]:
+    """Parse the model's CSV-ish output into a de-duplicated keyword list."""
+    seen, out = set(), []
+    for line in (text or "").splitlines():
+        v = line.strip()
+        if not v or v.startswith("```"):  # skip blanks and code fences
+            continue
+        if "," in v:  # single-column CSV, but be tolerant of extra columns
+            v = v.split(",", 1)[0]
+        v = v.strip().strip('"').lstrip("-*•").strip()
+        if not v or v.lower() in ("keyword", "keywords"):  # skip header
+            continue
+        key = v.lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(v)
+    return out[:200]
+
+
+def _generate_keywords(feature_name: str, doc_content: str, template: str) -> list[str]:
+    """One LLM call: derive scrape keywords from the documentation."""
+    prompt = template.replace("{{FEATURE_NAME}}", feature_name or "").replace(
+        "{{DOCUMENTATION}}", doc_content
+    )
+    client = anthropic.Anthropic()
+    response = client.messages.create(
+        model=FIT_MODEL,
+        max_tokens=2000,
+        output_config={"effort": "low"},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    return _parse_keyword_csv(text)
+
+
+def _resolve_keywords(feature: dict, doc_content: str) -> list[str]:
+    """Return the feature's scrape keywords, generating them only when the docs
+    or the keyword prompt have changed (cached like the documentation brief)."""
+    existing = feature.get("keywords")
+    if not doc_content.strip():
+        return existing or []
+    kw_template = get_setting("keyword_prompt") or KEYWORD_PROMPT
+    content_hash = hashlib.sha256(
+        (kw_template + "\x00" + doc_content).encode("utf-8")
+    ).hexdigest()
+    if existing is not None and feature.get("keywords_hash") == content_hash:
+        logger.info("Reusing cached keywords for feature %s", feature["id"])
+        return existing
+    try:
+        keywords = _generate_keywords(feature["name"], doc_content, kw_template)
+    except Exception:
+        logger.exception("Keyword generation failed; keeping any existing keywords")
+        return existing or []
+    save_keywords(feature["id"], keywords, content_hash)
+    logger.info("Generated %d keywords for feature %s", len(keywords), feature["id"])
+    return keywords
+
+
+def _crawl_site(seed_url: str, run_id: str, feature_id: int, keywords: list[str]) -> dict:
     """Crawl a seed URL and same-domain links (BFS), recording coverage in
     crawled_pages and accumulating visible page text up to CRAWL_CONTENT_CHARS.
 
-    Returns {domain, pages_crawled, pages_ok, pages_skipped_robots, text}.
+    Returns {domain, pages_crawled, pages_ok, pages_skipped_robots, text,
+    keyword_counts}.
     """
     seed = _ensure_scheme(seed_url.strip())
     base = _base_domain(urlparse(seed).netloc)
@@ -316,6 +391,9 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int) -> dict:
     pages_skipped_robots = 0
     chunks: list[str] = []
     total_chars = 0
+    # Case-insensitive substring counts across the whole site, per keyword.
+    lowered_keywords = [(kw, kw.lower()) for kw in keywords if kw.strip()]
+    keyword_counts: dict[str, int] = {}
 
     while queue and pages_crawled < CRAWL_MAX_PAGES and total_chars < CRAWL_CONTENT_CHARS:
         url = queue.popleft()
@@ -359,6 +437,14 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int) -> dict:
         pages_ok += 1
 
         if text:
+            # Count keywords on the full page text (independent of the LLM budget).
+            if lowered_keywords:
+                lowered = text.lower()
+                for kw, kwl in lowered_keywords:
+                    c = lowered.count(kwl)
+                    if c:
+                        keyword_counts[kw] = keyword_counts.get(kw, 0) + c
+
             remaining = CRAWL_CONTENT_CHARS - total_chars
             snippet = text[:remaining]
             chunks.append(f"\n\n## {url}\n{snippet}")
@@ -384,6 +470,7 @@ def _crawl_site(seed_url: str, run_id: str, feature_id: int) -> dict:
         "pages_ok": pages_ok,
         "pages_skipped_robots": pages_skipped_robots,
         "text": "".join(chunks).strip(),
+        "keyword_counts": keyword_counts,
     }
 
 
@@ -482,17 +569,23 @@ def assess_domain(
     feature_name: str,
     doc_brief: str,
     prompt_template: str,
+    keywords: list[str],
 ) -> dict:
-    """Crawl one prospect domain, then ask Claude how well it fits the feature.
-    Records crawl coverage and upserts a fit_assessments row."""
-    crawl = _crawl_site(seed_url, run_id, feature_id)
+    """Crawl one prospect domain (counting keywords), then ask Claude how well it
+    fits the feature. Records crawl coverage, keyword hits, and a fit_assessments
+    row."""
+    crawl = _crawl_site(seed_url, run_id, feature_id, keywords)
     domain = crawl["domain"]
+
+    # Replace this company's keyword tallies with the current run's counts.
+    save_keyword_hits(feature_id, run_id, domain, crawl["keyword_counts"])
 
     assessment = {
         "run_id": run_id,
         "feature_id": feature_id,
         "domain": domain,
         "pages_analyzed": crawl["pages_ok"],
+        "content_chars": len(crawl["text"]),
     }
     try:
         assessment.update(
@@ -542,21 +635,23 @@ async def run_crawl(feature_id: int, domains: list[str]) -> dict:
         (feature.get("additional_prompt") or "").strip() or _NO_FEATURE_INSTRUCTIONS,
     )
 
-    # Fetch the docs once (HTTP), then distill them into a compact brief with a
-    # single LLM call — cached across runs so unchanged docs aren't re-distilled.
-    # Every per-company call sees this small brief instead of the full page.
+    # Fetch the docs once (HTTP), then — in the same setup step — distill them
+    # into a brief and generate scrape keywords. Both are single LLM calls cached
+    # across runs, so unchanged docs/prompts aren't reprocessed.
     doc_content = _fetch_doc_content(feature["documentation_url"])
     doc_brief = _resolve_doc_brief(feature, doc_content)
+    keywords = _resolve_keywords(feature, doc_content)
     logger.info(
         f"Starting run {run_id} for feature {feature_id} ({feature['name']}): "
         f"{len(seeds)} seed domains, {len(doc_content)} chars of docs → "
-        f"{len(doc_brief)} char brief"
+        f"{len(doc_brief)} char brief, {len(keywords)} keywords"
     )
 
     results = await asyncio.gather(
         *[
             assess_domain(
-                seed, feature_id, run_id, feature["name"], doc_brief, prompt_template
+                seed, feature_id, run_id, feature["name"], doc_brief,
+                prompt_template, keywords,
             )
             for seed in seeds
         ]

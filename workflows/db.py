@@ -79,14 +79,31 @@ def init_db() -> None:
                 recommendation TEXT,
                 model          TEXT,
                 pages_analyzed INTEGER,
+                content_chars  INTEGER,
                 error          TEXT,
                 assessed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT fit_assessments_feature_domain_key UNIQUE (feature_id, domain)
             )
         """)
+        cur.execute("ALTER TABLE fit_assessments ADD COLUMN IF NOT EXISTS content_chars INTEGER")
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_fit_assessments_feature ON fit_assessments (feature_id)"
         )
+
+        # Keyword counts per (feature, company domain) for the heatmap.
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS keyword_hits (
+                id         SERIAL      PRIMARY KEY,
+                feature_id INTEGER     NOT NULL,
+                run_id     TEXT        NOT NULL,
+                domain     TEXT        NOT NULL,
+                keyword    TEXT        NOT NULL,
+                count      INTEGER     NOT NULL,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                CONSTRAINT keyword_hits_feature_domain_keyword_key UNIQUE (feature_id, domain, keyword)
+            )
+        """)
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_keyword_hits_feature ON keyword_hits (feature_id)")
 
         # Editable app settings (e.g. the default fit-assessment prompt).
         cur.execute("""
@@ -106,6 +123,8 @@ def init_db() -> None:
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS additional_prompt TEXT")
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief TEXT")
             cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS doc_brief_hash TEXT")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS keywords JSONB")
+            cur.execute("ALTER TABLE features ADD COLUMN IF NOT EXISTS keywords_hash TEXT")
     logger.info("Database ready")
 
 
@@ -114,8 +133,8 @@ def get_feature(feature_id: int) -> dict | None:
     dashboard), or None if it doesn't exist."""
     with _cursor() as cur:
         cur.execute(
-            "SELECT id, name, documentation_url, additional_prompt, doc_brief, doc_brief_hash "
-            "FROM features WHERE id = %s",
+            "SELECT id, name, documentation_url, additional_prompt, doc_brief, doc_brief_hash, "
+            "keywords, keywords_hash FROM features WHERE id = %s",
             (feature_id,),
         )
         row = cur.fetchone()
@@ -128,6 +147,8 @@ def get_feature(feature_id: int) -> dict | None:
             "additional_prompt": row[3],
             "doc_brief": row[4],
             "doc_brief_hash": row[5],
+            "keywords": row[6],
+            "keywords_hash": row[7],
         }
 
 
@@ -139,6 +160,35 @@ def save_doc_brief(feature_id: int, brief: str, content_hash: str) -> None:
             "UPDATE features SET doc_brief = %s, doc_brief_hash = %s WHERE id = %s",
             (brief, content_hash, feature_id),
         )
+
+
+def save_keywords(feature_id: int, keywords: list[str], content_hash: str) -> None:
+    """Cache the generated keyword list and the hash it was derived from."""
+    with _cursor() as cur:
+        cur.execute(
+            "UPDATE features SET keywords = %s, keywords_hash = %s WHERE id = %s",
+            (psycopg2.extras.Json(keywords), content_hash, feature_id),
+        )
+
+
+def save_keyword_hits(feature_id: int, run_id: str, domain: str, counts: dict[str, int]) -> None:
+    """Replace a company's keyword counts for a feature with this run's tallies."""
+    with _cursor() as cur:
+        cur.execute(
+            "DELETE FROM keyword_hits WHERE feature_id = %s AND domain = %s",
+            (feature_id, domain),
+        )
+        rows = [
+            (feature_id, run_id, domain, kw, cnt)
+            for kw, cnt in counts.items()
+            if cnt
+        ]
+        if rows:
+            psycopg2.extras.execute_values(
+                cur,
+                "INSERT INTO keyword_hits (feature_id, run_id, domain, keyword, count) VALUES %s",
+                rows,
+            )
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:
@@ -184,8 +234,8 @@ def save_fit_assessment(assessment: dict) -> None:
             """
             INSERT INTO fit_assessments
                 (run_id, feature_id, domain, fit_score, tier, summary,
-                 signals, recommendation, model, pages_analyzed, error)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 signals, recommendation, model, pages_analyzed, content_chars, error)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT ON CONSTRAINT fit_assessments_feature_domain_key DO UPDATE
                 SET run_id         = EXCLUDED.run_id,
                     fit_score      = EXCLUDED.fit_score,
@@ -195,6 +245,7 @@ def save_fit_assessment(assessment: dict) -> None:
                     recommendation = EXCLUDED.recommendation,
                     model          = EXCLUDED.model,
                     pages_analyzed = EXCLUDED.pages_analyzed,
+                    content_chars  = EXCLUDED.content_chars,
                     error          = EXCLUDED.error,
                     assessed_at    = NOW()
             """,
@@ -209,6 +260,7 @@ def save_fit_assessment(assessment: dict) -> None:
                 assessment.get("recommendation"),
                 assessment.get("model"),
                 assessment.get("pages_analyzed"),
+                assessment.get("content_chars"),
                 assessment.get("error"),
             ),
         )

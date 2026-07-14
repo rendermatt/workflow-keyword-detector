@@ -54,7 +54,7 @@
 </header>
 <div class="container">
   <h2>Global Prompts</h2>
-  <p class="subtitle">Two prompts drive every crawl, and both are the same for all features — only the placeholders differ per feature. The <strong>distillation prompt</strong> summarizes a feature's docs into a brief (once per crawl); the <strong>base fit prompt</strong> scores each company using that brief.</p>
+  <p class="subtitle">Three prompts drive every crawl, and all are the same for every feature — only the placeholders differ. The <strong>distillation prompt</strong> summarizes a feature's docs into a brief and the <strong>keyword prompt</strong> derives scrape terms from them (both once per crawl); the <strong>base fit prompt</strong> scores each company using that brief.</p>
 
   <div class="panel">
     <h3>Base fit prompt</h3>
@@ -92,21 +92,39 @@
       <span class="status" id="distill-status"></span>
     </div>
   </div>
+
+  <div class="panel">
+    <h3>Keyword prompt</h3>
+    <p class="lead">Run once per crawl to derive the list of terms the crawler counts on each prospect site (shown as the heatmap on the dashboard). Ask for a single-column CSV of keywords; the output is parsed one keyword per line. Same for every feature — only the documentation differs. Editing it regenerates each feature's keywords on its next crawl.</p>
+    <div class="callout">Keep <code>{% raw %}{{DOCUMENTATION}}{% endraw %}</code> in the text — without it the model has nothing to derive keywords from.</div>
+    <dl class="ph-list">{% raw %}
+      <div><dt>{{FEATURE_NAME}}</dt><dd>The feature's name.</dd></div>
+      <div><dt>{{DOCUMENTATION}}</dt><dd>The visible text fetched from the feature's documentation URL (the full page).</dd></div>
+    {% endraw %}</dl>
+    <label for="keyword-prompt" style="margin-top:16px">Keyword prompt template</label>
+    <textarea id="keyword-prompt" style="min-height:240px" placeholder="Loading…"></textarea>
+    <div class="actions">
+      <button class="btn-primary" id="keyword-save" onclick="save('keyword')">Save keyword prompt</button>
+      <button class="btn-ghost" onclick="resetDefault('keyword')">Reset to default</button>
+      <span class="status" id="keyword-status"></span>
+    </div>
+  </div>
 </div>
 <script>
 const els = {
   base:    { ta: 'base-prompt',    btn: 'base-save',    status: 'base-status',    label: 'base prompt' },
   distill: { ta: 'distill-prompt', btn: 'distill-save', status: 'distill-status', label: 'distillation prompt' },
+  keyword: { ta: 'keyword-prompt', btn: 'keyword-save', status: 'keyword-status', label: 'keyword prompt' },
 };
-const defaults = { base: '', distill: '' };
+const defaults = { base: '', distill: '', keyword: '' };
 function setStatus(which, msg, kind) { const el = document.getElementById(els[which].status); el.textContent = msg || ''; el.className = 'status' + (kind ? ' ' + kind : ''); }
 
 async function load() {
   const data = await fetch('/api/settings/prompts').then(r => r.json());
-  defaults.base = data.base.default || '';
-  defaults.distill = data.distill.default || '';
-  document.getElementById(els.base.ta).value = data.base.value || '';
-  document.getElementById(els.distill.ta).value = data.distill.value || '';
+  for (const which of Object.keys(els)) {
+    defaults[which] = data[which].default || '';
+    document.getElementById(els[which].ta).value = data[which].value || '';
+  }
 }
 async function save(which) {
   const value = document.getElementById(els[which].ta).value.trim();

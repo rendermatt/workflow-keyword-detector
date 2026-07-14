@@ -102,6 +102,16 @@
       color: var(--weak); border-radius: 6px; padding: 1px 8px; font-size: 11.5px; white-space: nowrap; }
     details > summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-top: 8px; }
 
+    /* Keyword heatmap */
+    .heatmap-scroll { overflow-x: auto; margin-top: 6px; }
+    table.heatmap { border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+    table.heatmap th { padding: 4px 8px; color: var(--muted); font-weight: 500; text-align: left; position: sticky; top: 0; background: var(--surface); }
+    table.heatmap th.col-head { writing-mode: vertical-rl; transform: rotate(180deg); padding: 8px 4px; max-width: 26px; text-align: left; }
+    table.heatmap td { padding: 4px 8px; border: 1px solid var(--border); }
+    table.heatmap td.domain-cell { color: var(--text); max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+      position: sticky; left: 0; background: var(--surface); z-index: 1; }
+    table.heatmap td.count-cell { text-align: center; min-width: 26px; font-weight: 600; }
+
     /* Crawl modal form */
     .crawl-field { margin-bottom: 18px; }
     .crawl-field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: .04em; }
@@ -170,6 +180,11 @@
       <div id="fit-container"><div class="loading">Loading…</div></div>
     </div>
   </div>
+
+  <div class="panel">
+    <div class="section-title">Keyword Heatmap <span class="badge">company × keyword hits</span></div>
+    <div class="heatmap-scroll" id="heatmap-container"><div class="loading">Loading…</div></div>
+  </div>
 </div>
 
 <!-- Company detail modal -->
@@ -222,6 +237,13 @@ const TIER_LABELS = { strong: 'Strong (75-100)', promising: 'Promising (50-74)',
 
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function fmtDate(d) { return d ? new Date(d).toLocaleString() : '—'; }
+function fmtChars(n) { if (n == null) return ''; return n >= 1000 ? (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k' : String(n); }
+function coverageText(f) {
+  const parts = [];
+  if (f.pages_analyzed != null) parts.push(`${f.pages_analyzed} page${f.pages_analyzed === 1 ? '' : 's'}`);
+  if (f.content_chars != null) parts.push(`${fmtChars(f.content_chars)} chars`);
+  return parts.join(' · ');
+}
 function scoreColor(s) { const h = Math.max(0, Math.min(120, (s / 100) * 120)); return `hsl(${h}, 65%, 48%)`; }
 function featureQuery() { const id = document.getElementById('feature-filter').value; return id ? `?feature_id=${encodeURIComponent(id)}` : ''; }
 
@@ -261,6 +283,39 @@ async function load() {
 
   renderDistribution(fit);
   renderFitList(fit);
+  loadHeatmap();
+}
+
+function hmColor(value, max) {
+  if (!value) return 'transparent';
+  const t = Math.min(value / max, 1);
+  return `hsl(${260 - t * 60}, ${60 + t * 30}%, ${20 + t * 32}%)`;  // purple → teal as intensity rises
+}
+
+async function loadHeatmap() {
+  const c = document.getElementById('heatmap-container');
+  const { domains, keywords, matrix } = await fetch('/api/heatmap' + featureQuery()).then(r => r.json());
+  if (!domains.length || !keywords.length) {
+    c.innerHTML = '<div class="empty">No keyword hits yet — keywords are generated and counted on the next crawl.</div>';
+    return;
+  }
+  const max = Math.max(...matrix.flat(), 1);
+  const table = document.createElement('table'); table.className = 'heatmap';
+  const thead = table.createTHead(); const hr = thead.insertRow();
+  const corner = document.createElement('th'); corner.textContent = 'Company'; hr.appendChild(corner);
+  keywords.forEach(kw => { const th = document.createElement('th'); th.className = 'col-head'; th.textContent = kw; hr.appendChild(th); });
+  const tbody = table.createTBody();
+  domains.forEach((d, ri) => {
+    const row = tbody.insertRow();
+    const dc = row.insertCell(); dc.className = 'domain-cell'; dc.textContent = d; dc.title = d;
+    matrix[ri].forEach(v => {
+      const td = row.insertCell(); td.className = 'count-cell';
+      td.style.background = hmColor(v, max);
+      td.style.color = v > 0 ? '#fff' : 'var(--muted)';
+      td.textContent = v > 0 ? v : '·';
+    });
+  });
+  c.innerHTML = ''; c.appendChild(table);
 }
 
 function renderDistribution(fit) {
@@ -292,7 +347,7 @@ function renderFitList(fit) {
   fit.forEach((f, i) => {
     const row = document.createElement('div'); row.className = 'fit-row';
     const scored = f.fit_score != null;
-    const pages = f.pages_analyzed != null ? `${f.pages_analyzed} pages` : '';
+    const pages = coverageText(f);
     const barColor = scored ? scoreColor(f.fit_score) : 'var(--muted)';
     const tierCls = f.error ? 'pending' : (f.tier || 'pending');
     const tierLabel = f.error ? 'error' : (f.tier || 'pending');
@@ -327,7 +382,10 @@ async function openDetail(i) {
   if (f.summary) html += `<div class="subhead">Summary</div><p class="assess-summary">${esc(f.summary)}</p>`;
   if (signals.length) html += `<div class="subhead">Signals</div><ul class="signals">${signals.map(s => `<li>${esc(s)}</li>`).join('')}</ul>`;
   if (f.recommendation) html += `<div class="subhead">Recommendation</div><div class="reco">${esc(f.recommendation)}</div>`;
-  html += `<div class="subhead">Crawl coverage</div><div id="dm-pages"><span style="color:var(--muted);font-size:13px">Loading pages…</span></div>`;
+  html += `<div class="subhead">Crawl coverage</div>`;
+  const cov = coverageText(f);
+  if (cov) html += `<div style="font-size:13px;color:var(--muted);margin-bottom:8px">${esc(cov)} sent to the model.</div>`;
+  html += `<div id="dm-pages"><span style="color:var(--muted);font-size:13px">Loading pages…</span></div>`;
   if (f.model) html += `<p style="color:var(--muted);font-size:11px;margin-top:16px">Assessed by ${esc(f.model)} · ${fmtDate(f.assessed_at)}</p>`;
   document.getElementById('dm-body').innerHTML = html;
   document.getElementById('detail-modal').classList.add('open');
